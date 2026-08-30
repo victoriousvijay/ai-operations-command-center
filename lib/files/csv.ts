@@ -52,10 +52,65 @@ function parseCsvRows(text: string): string[][] {
 }
 
 const EMAIL_RE = /^[\w.+-]+@[\w-]+\.[\w.-]+$/;
+// Excel/Sheets silently mangles a long numeric-looking phone column into
+// scientific notation on export (e.g. "919877123456" -> "9.19877E+11").
+// Once that happens the original digits are unrecoverable — never guess
+// them back.
+const SCIENTIFIC_NOTATION_RE = /^\d+(\.\d+)?e\+?\d+$/i;
 
 function normalizeHeader(h: string): string {
   return h.trim().toLowerCase().replace(/[\s_-]+/g, "");
 }
+
+/** Normalizes a command/action cell to SCREAMING_SNAKE_CASE for exact matching. */
+function normalizeCommand(raw: string): string {
+  return raw.trim().toUpperCase().replace(/[\s-]+/g, "_");
+}
+
+/**
+ * Every command this CSV importer recognizes, mapped to the real,
+ * verified action it executes. This is an explicit allowlist matched
+ * exactly (after normalization) — never a loose substring/keyword guess —
+ * so a command can never be silently misclassified as a different one.
+ * Anything not listed here (or not in UNSUPPORTED_COMMANDS below) is
+ * rejected with a clear "unrecognized command" error, never defaulted to
+ * UPSERT_CONTACT.
+ */
+const COMMAND_ALIASES: Record<string, string> = {
+  CREATE_CONTACT: "UPSERT_CONTACT",
+  UPDATE_CONTACT: "UPSERT_CONTACT",
+  UPSERT_CONTACT: "UPSERT_CONTACT",
+  CREATE_TASK: "CREATE_TASK",
+  FOLLOW_UP: "CREATE_TASK",
+  ADD_CONTACT_TAG: "ADD_CONTACT_TAG",
+  ADD_TAG: "ADD_CONTACT_TAG",
+  REMOVE_CONTACT_TAG: "REMOVE_CONTACT_TAG",
+  REMOVE_TAG: "REMOVE_CONTACT_TAG",
+  ADD_NOTE: "ADD_NOTE",
+  NOTE: "ADD_NOTE",
+  CREATE_OPPORTUNITY: "CREATE_OPPORTUNITY",
+  UPDATE_OPPORTUNITY: "UPDATE_OPPORTUNITY",
+  // GoHighLevel has no separate "contact status" field — a lead's status
+  // (New / Contacted / Qualified / Proposal / ...) is really its
+  // opportunity's pipeline stage in this CRM. CHANGE_STATUS is therefore
+  // handled as a stage move, the same real, verified operation
+  // UPDATE_OPPORTUNITY already uses — not a fabricated new API.
+  CHANGE_STATUS: "UPDATE_OPPORTUNITY",
+  SEND_EMAIL: "SEND_MESSAGE_EMAIL",
+  SEND_SMS: "SEND_MESSAGE_SMS",
+};
+
+/**
+ * Commands this file format recognizes but that have no real, verified
+ * GoHighLevel/n8n operation behind them yet — reported as a clear,
+ * specific error rather than silently run as something else or dropped.
+ */
+const UNSUPPORTED_COMMANDS: Record<string, string> = {
+  ASSIGN_LEAD: "Assigning a lead to a user/team has no verified GoHighLevel API in this build's action registry yet.",
+  CREATE_WEBHOOK: "Webhook management is an n8n/automation-platform concept, not a GoHighLevel CRM action — out of scope for this registry.",
+  TRIGGER_WEBHOOK: "Webhook management is an n8n/automation-platform concept, not a GoHighLevel CRM action — out of scope for this registry.",
+  RUN_WORKFLOW: "Running an arbitrary workflow is exactly the kind of uncontrolled action this system's allowlist exists to prevent — not implemented.",
+};
 
 /**
  * Converts a CSV row into a planned action, purely from the row's own data
@@ -78,11 +133,12 @@ function rowToAction(headers: string[], values: string[], rowNumber: number): Pl
   const firstName = get("firstname");
   const lastName = get("lastname");
   const email = get("email");
-  const phone = get("phone");
+  const rawPhone = get("phone");
   const company = get("company", "companyname");
-  const action = get("action", "instruction")?.toLowerCase();
-  const stage = get("stage", "targetstage");
+  const rawCommand = get("action", "command", "instruction");
+  const stage = get("stage", "targetstage", "status");
   const pipeline = get("pipeline");
+  const value = get("value", "opportunityvalue", "amount");
   const tags = get("tags")
     ?.split(/[;|]/)
     .map((t) => t.trim())
@@ -90,19 +146,49 @@ function rowToAction(headers: string[], values: string[], rowNumber: number): Pl
   const taskTitle = get("tasktitle", "task");
   const taskDueDate = get("taskduedate", "duedate");
   const note = get("note", "notes");
+  const messageBody = get("task", "message", "body");
 
-  const target = name ?? [firstName, lastName].filter(Boolean).join(" ") ?? email ?? phone ?? `row ${rowNumber}`;
+  const target = name ?? [firstName, lastName].filter(Boolean).join(" ") ?? email ?? rawPhone ?? `row ${rowNumber}`;
   const lookupHint = name ?? ([firstName, lastName].filter(Boolean).join(" ") || email);
 
   if (email && !EMAIL_RE.test(email)) {
     return { source: rowNumber, type: null, payload: {}, status: "error", target, message: `Invalid email "${email}".` };
   }
 
-  if (action?.includes("update") && action.includes("opportunity")) {
-    if (!stage) {
-      return { source: rowNumber, type: null, payload: {}, status: "error", target, message: "UPDATE_OPPORTUNITY row needs a Stage value." };
-    }
+  let phoneWarning: string | undefined;
+  let phone = rawPhone;
+  if (phone && SCIENTIFIC_NOTATION_RE.test(phone)) {
+    phoneWarning = `Phone value "${phone}" was corrupted by spreadsheet auto-formatting (scientific notation) — the original digits can't be recovered, so it was dropped. Re-export this column as text.`;
+    phone = undefined;
+  }
+
+  const command = rawCommand ? normalizeCommand(rawCommand) : "";
+  const resolved = command ? COMMAND_ALIASES[command] : "UPSERT_CONTACT"; // blank command = plain contact upsert
+
+  if (!resolved) {
+    const unsupportedReason = UNSUPPORTED_COMMANDS[command];
     return {
+      source: rowNumber,
+      type: null,
+      payload: {},
+      status: "error",
+      target,
+      message: unsupportedReason
+        ? `UNSUPPORTED command "${rawCommand}": ${unsupportedReason}`
+        : `UNSUPPORTED command "${rawCommand}": not a recognized action. Supported: ${Object.keys(COMMAND_ALIASES).join(", ")}.`,
+    };
+  }
+
+  const withPhoneWarning = (planned: PlannedAction): PlannedAction => {
+    if (!phoneWarning) return planned;
+    return { ...planned, status: planned.status === "error" ? "error" : "warning", message: [planned.message, phoneWarning].filter(Boolean).join(" ") };
+  };
+
+  if (resolved === "UPDATE_OPPORTUNITY") {
+    if (!stage) {
+      return { source: rowNumber, type: null, payload: {}, status: "error", target, message: "UPDATE_OPPORTUNITY (or CHANGE_STATUS) row needs a Stage/Status value." };
+    }
+    return withPhoneWarning({
       source: rowNumber,
       type: "UPDATE_OPPORTUNITY",
       payload: {
@@ -110,18 +196,42 @@ function rowToAction(headers: string[], values: string[], rowNumber: number): Pl
         opportunityLookupHint: true,
         stageNameHint: stage,
         ...(pipeline ? { pipelineNameHint: pipeline } : {}),
+        ...(value ? { monetaryValue: Number(value) } : {}),
       },
       status: "ready",
       target,
       message: `Move ${target}'s opportunity to "${stage}"${pipeline ? ` in ${pipeline}` : ""} (stage/pipeline verified at execution time).`,
-    };
+    });
   }
 
-  if (action?.includes("task") || action?.includes("follow")) {
+  if (resolved === "CREATE_OPPORTUNITY") {
+    if (!lookupHint) {
+      return { source: rowNumber, type: null, payload: {}, status: "error", target, message: "CREATE_OPPORTUNITY row needs a Name or Email to find the contact." };
+    }
+    if (!stage) {
+      return { source: rowNumber, type: null, payload: {}, status: "error", target, message: "CREATE_OPPORTUNITY row needs a Stage value." };
+    }
+    return withPhoneWarning({
+      source: rowNumber,
+      type: "CREATE_OPPORTUNITY",
+      payload: {
+        contactLookupHint: lookupHint,
+        stageNameHint: stage,
+        ...(pipeline ? { pipelineNameHint: pipeline } : {}),
+        name: `${target} Opportunity`,
+        ...(value ? { monetaryValue: Number(value) } : {}),
+      },
+      status: "ready",
+      target,
+      message: `Create an opportunity for ${target} in stage "${stage}"${pipeline ? ` (${pipeline})` : ""}${value ? `, value ${value}` : ""} (stage/pipeline verified at execution time).`,
+    });
+  }
+
+  if (resolved === "CREATE_TASK") {
     if (!lookupHint) {
       return { source: rowNumber, type: null, payload: {}, status: "error", target, message: "CREATE_TASK row needs a Name or Email to find the contact." };
     }
-    return {
+    return withPhoneWarning({
       source: rowNumber,
       type: "CREATE_TASK",
       payload: {
@@ -131,28 +241,42 @@ function rowToAction(headers: string[], values: string[], rowNumber: number): Pl
       },
       status: "ready",
       target,
-    };
+    });
   }
 
-  if (action?.includes("tag")) {
+  if (resolved === "ADD_CONTACT_TAG" || resolved === "REMOVE_CONTACT_TAG") {
     if (!lookupHint || !tags?.length) {
-      return { source: rowNumber, type: null, payload: {}, status: "error", target, message: "ADD_CONTACT_TAG row needs a Name/Email and a Tags value." };
+      return { source: rowNumber, type: null, payload: {}, status: "error", target, message: `${resolved} row needs a Name/Email and a Tags value.` };
     }
-    return { source: rowNumber, type: "ADD_CONTACT_TAG", payload: { contactLookupHint: lookupHint, tags }, status: "ready", target };
+    return withPhoneWarning({ source: rowNumber, type: resolved, payload: { contactLookupHint: lookupHint, tags }, status: "ready", target });
   }
 
-  if (action?.includes("note")) {
+  if (resolved === "ADD_NOTE") {
     if (!lookupHint || !note) {
       return { source: rowNumber, type: null, payload: {}, status: "error", target, message: "ADD_NOTE row needs a Name/Email and a Note value." };
     }
-    return { source: rowNumber, type: "ADD_NOTE", payload: { contactLookupHint: lookupHint, body: note }, status: "ready", target };
+    return withPhoneWarning({ source: rowNumber, type: "ADD_NOTE", payload: { contactLookupHint: lookupHint, body: note }, status: "ready", target });
   }
 
-  // Default (including explicit "Create Contact"): upsert the contact.
+  if (resolved === "SEND_MESSAGE_EMAIL" || resolved === "SEND_MESSAGE_SMS") {
+    if (!lookupHint || !messageBody) {
+      return { source: rowNumber, type: null, payload: {}, status: "error", target, message: `${command} row needs a Name/Email and a message body.` };
+    }
+    return withPhoneWarning({
+      source: rowNumber,
+      type: "SEND_MESSAGE",
+      payload: { contactLookupHint: lookupHint, message: messageBody, type: resolved === "SEND_MESSAGE_EMAIL" ? "Email" : "SMS" },
+      status: "ready",
+      target,
+      message: `Sends a real ${resolved === "SEND_MESSAGE_EMAIL" ? "email" : "SMS"} to ${target} — requires confirmation before it runs.`,
+    });
+  }
+
+  // resolved === "UPSERT_CONTACT"
   if (!email && !phone) {
     return { source: rowNumber, type: null, payload: {}, status: "error", target, message: "Row needs at least an Email or Phone to create/update a contact." };
   }
-  return {
+  return withPhoneWarning({
     source: rowNumber,
     type: "UPSERT_CONTACT",
     payload: {
@@ -166,7 +290,7 @@ function rowToAction(headers: string[], values: string[], rowNumber: number): Pl
     },
     status: "ready",
     target,
-  };
+  });
 }
 
 export function parseCsvFile(fileName: string, text: string): FileParseResult {
@@ -203,7 +327,7 @@ export function parseCsvFile(fileName: string, text: string): FileParseResult {
     if (email && planned.status !== "error") {
       if (seenEmails.has(email)) {
         planned.status = "warning";
-        planned.message = (planned.message ? planned.message + " " : "") + `Duplicate email "${email}" also appears earlier in this file — both will run (UPSERT_CONTACT is safe to repeat).`;
+        planned.message = (planned.message ? planned.message + " " : "") + `Duplicate email "${email}" also appears earlier in this file.`;
       }
       seenEmails.add(email);
     }

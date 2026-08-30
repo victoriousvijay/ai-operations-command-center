@@ -46,6 +46,34 @@ function formatTimestamp(iso: string): string {
 
 const RUNNING_STATUSES = new Set(["received", "interpreting", "executing"]);
 
+/**
+ * Pulls the real GoHighLevel resource ID out of an action's stored API
+ * response, when there is one — proof this was a genuine confirmed
+ * execution (a real contact/task/opportunity/etc ID from GHL), not a
+ * fabricated success. Returns null for read-only actions or when the
+ * response shape doesn't carry a single obvious resource.
+ */
+function extractResourceId(response: Record<string, unknown> | null): { label: string; id: string } | null {
+  if (!response) return null;
+  const shapes: Array<[string, string]> = [
+    ["contact", "Contact"],
+    ["task", "Task"],
+    ["opportunity", "Opportunity"],
+    ["pipeline", "Pipeline"],
+    ["note", "Note"],
+    ["customField", "Custom Field"],
+    ["conversation", "Conversation"],
+  ];
+  for (const [key, label] of shapes) {
+    const value = response[key];
+    if (value && typeof value === "object" && "id" in value && typeof (value as { id: unknown }).id === "string") {
+      return { label, id: (value as { id: string }).id };
+    }
+  }
+  if (typeof response.messageId === "string") return { label: "Message", id: response.messageId };
+  return null;
+}
+
 export function Dashboard() {
   const [requests, setRequests] = useState<RequestWithActions[] | null>(null);
   const [agents, setAgents] = useState<Agent[] | null>(null);
@@ -475,15 +503,31 @@ export function Dashboard() {
                   <p className="text-sm text-neutral-200">{request.userRequest}</p>
                   {request.actions.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
-                      {request.actions.map((action) => (
-                        <span
-                          key={action.id}
-                          className="inline-flex items-center gap-1 rounded border border-neutral-800 px-1.5 py-0.5 text-xs text-neutral-400"
-                        >
-                          {action.actionType}
-                          <StatusBadge status={action.status} />
-                        </span>
-                      ))}
+                      {request.actions.map((action) => {
+                        const resource = action.status === "success" ? extractResourceId(action.response) : null;
+                        const errorMessage =
+                          action.status === "failed" && action.response && typeof action.response.error === "string"
+                            ? action.response.error
+                            : action.status === "failed" && action.response && typeof (action.response.error as { message?: string })?.message === "string"
+                              ? (action.response.error as { message: string }).message
+                              : null;
+                        return (
+                          <span
+                            key={action.id}
+                            className="inline-flex items-center gap-1 rounded border border-neutral-800 px-1.5 py-0.5 text-xs text-neutral-400"
+                            title={errorMessage ?? undefined}
+                          >
+                            {action.actionType}
+                            <StatusBadge status={action.status} />
+                            {resource && (
+                              <span className="font-mono text-neutral-600">
+                                {resource.label} #{resource.id.slice(0, 8)}
+                              </span>
+                            )}
+                            {errorMessage && <span className="max-w-[16rem] truncate text-red-400">— {errorMessage}</span>}
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                 </li>

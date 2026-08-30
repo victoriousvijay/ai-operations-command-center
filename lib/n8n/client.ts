@@ -156,6 +156,18 @@ export class MockN8nClient implements N8nClient {
         case "LIST_PIPELINES":
           response = { pipelines: await ghl.listPipelines() };
           break;
+        case "CREATE_PIPELINE":
+          response = { pipeline: await ghl.createPipeline(payload as never) };
+          break;
+        case "UPDATE_PIPELINE":
+        case "CREATE_PIPELINE_STAGE":
+        case "UPDATE_PIPELINE_STAGE":
+        case "DELETE_PIPELINE_STAGE":
+          response = { pipeline: await ghl.updatePipeline(payload as never) };
+          break;
+        case "DELETE_PIPELINE":
+          response = await ghl.deletePipeline(payload.pipelineId as string);
+          break;
 
         case "LIST_TASKS":
           response = { tasks: await ghl.listTasks(payload.contactId as string) };

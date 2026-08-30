@@ -86,6 +86,44 @@ export const payloadSchemas = {
   }),
 
   LIST_PIPELINES: z.object({}),
+  CREATE_PIPELINE: z.object({
+    name: z.string().min(1),
+    stages: z.array(z.object({ name: z.string().min(1) })).min(1),
+  }),
+  // pipelineNameHint/stageNameHint are accepted pre-resolution; by the time
+  // this schema runs (post-resolution, in MockN8nClient), resolvePipelineMutation
+  // has already replaced them with a real pipelineId/name/stages.
+  UPDATE_PIPELINE: z.object({
+    pipelineId: z.string().min(1),
+    pipelineNameHint: z.string().optional(),
+    name: z.string().min(1),
+    stages: z.array(z.object({ id: z.string().optional(), name: z.string().min(1), position: z.number() })).min(1),
+  }),
+  DELETE_PIPELINE: z.object({ pipelineId: z.string().min(1), pipelineNameHint: z.string().optional() }),
+  CREATE_PIPELINE_STAGE: z.object({
+    pipelineId: z.string().min(1),
+    pipelineNameHint: z.string().optional(),
+    stageName: z.string().optional(),
+    name: z.string().min(1),
+    stages: z.array(z.object({ id: z.string().optional(), name: z.string().min(1), position: z.number() })).min(1),
+  }),
+  UPDATE_PIPELINE_STAGE: z.object({
+    pipelineId: z.string().min(1),
+    pipelineNameHint: z.string().optional(),
+    stageId: z.string().optional(),
+    stageNameHint: z.string().optional(),
+    newStageName: z.string().optional(),
+    name: z.string().min(1),
+    stages: z.array(z.object({ id: z.string().optional(), name: z.string().min(1), position: z.number() })).min(1),
+  }),
+  DELETE_PIPELINE_STAGE: z.object({
+    pipelineId: z.string().min(1),
+    pipelineNameHint: z.string().optional(),
+    stageId: z.string().optional(),
+    stageNameHint: z.string().optional(),
+    name: z.string().min(1),
+    stages: z.array(z.object({ id: z.string().optional(), name: z.string().min(1), position: z.number() })).min(1),
+  }),
 
   LIST_TASKS: z.object({ contactId: z.string().min(1), contactLookupHint: z.string().optional() }),
   GET_TASK: z.object({ contactId: z.string().min(1), contactLookupHint: z.string().optional(), taskId: z.string().min(1) }),

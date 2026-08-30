@@ -18,7 +18,7 @@ against GoHighLevel dispatched through these exact workflows).
 |---|---|---|---|
 | `execution-logger-workflow` | `l1AmbDI9rZG36jGx` | (called via Execute Sub-workflow, not a webhook) | shared logging sub-workflow |
 | `ghl-contact-workflow` | `7fXGzZ3t5LDxmzEZ` | `.../webhook/ghl-contact-workflow` | all `*_CONTACT`, `*_CUSTOM_FIELD`, `*_CONVERSATION*`, `SEND_MESSAGE`, `LIST_CALENDARS` |
-| `ghl-opportunity-workflow` | `3x7is9oXX7zk5IB7` | `.../webhook/ghl-opportunity-workflow` | all `*_OPPORTUNITY`, `LIST_PIPELINES` |
+| `ghl-opportunity-workflow` | `3x7is9oXX7zk5IB7` | `.../webhook/ghl-opportunity-workflow` | all `*_OPPORTUNITY`, all `*_PIPELINE*` |
 | `ghl-task-workflow` | `A50aS059Vd31QRz3` | `.../webhook/ghl-task-workflow` | all `*_TASK`, `ADD_NOTE` |
 
 ### Generic executor design

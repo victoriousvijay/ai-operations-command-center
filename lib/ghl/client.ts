@@ -6,6 +6,7 @@ import {
   type CreateContactInput,
   type CreateCustomFieldInput,
   type CreateOpportunityInput,
+  type CreatePipelineInput,
   type CreateTaskInput,
   type ContactTagInput,
   type GhlCalendar,
@@ -23,6 +24,7 @@ import {
   type UpdateContactInput,
   type UpdateCustomFieldInput,
   type UpdateOpportunityInput,
+  type UpdatePipelineInput,
   type UpdateTaskInput,
   type UpsertContactInput,
 } from "./types";
@@ -41,13 +43,19 @@ import {
  *     verified live (create → tag → untag → delete round-trip).
  *   - Opportunities: GET/POST/PUT/DELETE /opportunities(/:id), GET
  *     /opportunities/search — verified live (create → delete round-trip).
- *     `POST /opportunities/pipelines` (create) returned
- *     `{"statusCode":401,"message":"The token is not authorized for this
- *     scope."}` — this PIT has pipelines READ but not WRITE scope, so
- *     pipeline/stage create-update-delete are intentionally NOT
- *     implemented here (see README.md's GHL scopes section for exactly
- *     what to grant if that's needed later). GET /opportunities/pipelines
- *     works and is used for listPipelines().
+ *   - Pipelines: GET/POST/PUT/DELETE /opportunities/pipelines(/:id) — all
+ *     verified live (create → rename+add-stage → delete round-trip) after
+ *     pipeline write scope was granted to this PIT (an earlier probe with
+ *     read-only scope returned `401 The token is not authorized for this
+ *     scope` on create — see README.md's GHL scopes section). One real API
+ *     quirk found live: `PUT /opportunities/pipelines/:id` REQUIRES the
+ *     full `stages` array on every call — omitting it doesn't leave stages
+ *     unchanged, it crashes the request with `{"success":false,"message":
+ *     "Cannot read properties of undefined (reading 'map')"}`. So adding,
+ *     renaming, or removing one stage means fetching the current pipeline
+ *     first and sending the complete merged array back — see
+ *     lib/orchestration/resolvers.ts's resolvePipelineMutation, the only
+ *     place that does this merge; this client method never does it itself.
  *   - Tasks/notes: POST /contacts/:id/tasks, PUT/DELETE
  *     /contacts/:id/tasks/:taskId, POST /contacts/:id/notes — verified
  *     live. Response bodies are wrapped (`{"task": {...}}` /
@@ -226,13 +234,44 @@ export class RealGhlClient implements GhlClient {
     return { success: true };
   }
 
-  // ── Pipelines (read-only — see class doc comment) ────────────────────
+  // ── Pipelines ─────────────────────────────────────────────────────────
   async listPipelines(): Promise<GhlPipeline[]> {
     const locationId = this.requireLocationId("pipeline listing");
     const data = await this.request<{ pipelines: GhlPipeline[] }>(
       `/opportunities/pipelines?locationId=${locationId}`,
     );
     return data.pipelines ?? [];
+  }
+
+  async getPipeline(pipelineId: string): Promise<GhlPipeline> {
+    const locationId = this.requireLocationId("pipeline lookup");
+    const data = await this.request<{ pipeline: GhlPipeline }>(
+      `/opportunities/pipelines/${pipelineId}?locationId=${locationId}`,
+    );
+    return data.pipeline;
+  }
+
+  async createPipeline(input: CreatePipelineInput): Promise<GhlPipeline> {
+    const locationId = this.requireLocationId("pipeline creation");
+    const data = await this.request<{ pipeline: GhlPipeline }>(`/opportunities/pipelines`, {
+      method: "POST",
+      body: JSON.stringify({ locationId, ...input }),
+    });
+    return data.pipeline;
+  }
+
+  async updatePipeline(input: UpdatePipelineInput): Promise<GhlPipeline> {
+    const { pipelineId, ...body } = input;
+    const data = await this.request<{ pipeline: GhlPipeline }>(`/opportunities/pipelines/${pipelineId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    return data.pipeline;
+  }
+
+  async deletePipeline(pipelineId: string): Promise<{ success: true }> {
+    await this.request(`/opportunities/pipelines/${pipelineId}`, { method: "DELETE" });
+    return { success: true };
   }
 
   // ── Tasks ─────────────────────────────────────────────────────────────
@@ -496,6 +535,31 @@ export class MockGhlClient implements GhlClient {
         ],
       },
     ];
+  }
+
+  async getPipeline(pipelineId: string): Promise<GhlPipeline> {
+    const pipelines = await this.listPipelines();
+    return pipelines.find((p) => p.id === pipelineId) ?? { id: pipelineId, name: "Mock Pipeline", stages: [] };
+  }
+
+  async createPipeline(input: CreatePipelineInput): Promise<GhlPipeline> {
+    return {
+      id: `mock-pipeline-${Date.now()}`,
+      name: input.name,
+      stages: input.stages.map((s, i) => ({ id: `mock-stage-${i}`, name: s.name, position: i })),
+    };
+  }
+
+  async updatePipeline(input: UpdatePipelineInput): Promise<GhlPipeline> {
+    return {
+      id: input.pipelineId,
+      name: input.name,
+      stages: input.stages.map((s, i) => ({ id: s.id ?? `mock-stage-${i}`, name: s.name, position: s.position })),
+    };
+  }
+
+  async deletePipeline(): Promise<{ success: true }> {
+    return { success: true };
   }
 
   async listTasks(contactId: string): Promise<GhlTask[]> {

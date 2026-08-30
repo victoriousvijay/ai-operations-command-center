@@ -4,7 +4,7 @@ import { getAgentAdapter } from "@/lib/agent";
 import { getGhlClient } from "@/lib/ghl";
 import { getN8nClient } from "@/lib/n8n";
 import { attachGhlRequest } from "@/lib/n8n/client";
-import { resolveContactId, resolveOpportunityId, resolvePipelineStage } from "./resolvers";
+import { resolveContactId, resolveOpportunityId, resolvePipelineMutation, resolvePipelineStage } from "./resolvers";
 import {
   createAutomationAction,
   createAutomationRequest,
@@ -62,6 +62,16 @@ const NEEDS_OPPORTUNITY_RESOLUTION = new Set<AllowedAction>(["UPDATE_OPPORTUNITY
 // Actions that may carry a pipeline/stage name hint instead of real IDs.
 const NEEDS_PIPELINE_STAGE_RESOLUTION = new Set<AllowedAction>(["CREATE_OPPORTUNITY", "UPDATE_OPPORTUNITY"]);
 
+// Actions that mutate a pipeline or its stages — need the pipeline (and,
+// for stage-level actions, its current full stage list) resolved first.
+const NEEDS_PIPELINE_MUTATION_RESOLUTION = new Set<AllowedAction>([
+  "UPDATE_PIPELINE",
+  "CREATE_PIPELINE_STAGE",
+  "UPDATE_PIPELINE_STAGE",
+  "DELETE_PIPELINE_STAGE",
+  "DELETE_PIPELINE",
+]);
+
 /**
  * Resolves every name/email/pipeline-name hint on a payload to real
  * GoHighLevel IDs, in dependency order (contact -> opportunity -> pipeline
@@ -89,6 +99,16 @@ async function resolveReferences(
 
   if (NEEDS_PIPELINE_STAGE_RESOLUTION.has(actionType)) {
     const resolved = await resolvePipelineStage(ghl, current);
+    if (resolved.error) return resolved;
+    current = resolved.payload;
+  }
+
+  if (NEEDS_PIPELINE_MUTATION_RESOLUTION.has(actionType)) {
+    const resolved = await resolvePipelineMutation(
+      ghl,
+      actionType as "UPDATE_PIPELINE" | "CREATE_PIPELINE_STAGE" | "UPDATE_PIPELINE_STAGE" | "DELETE_PIPELINE_STAGE" | "DELETE_PIPELINE",
+      current,
+    );
     if (resolved.error) return resolved;
     current = resolved.payload;
   }

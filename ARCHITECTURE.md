@@ -217,16 +217,18 @@ nothing has touched GoHighLevel yet — this is the propose → human-approve
 → execute gate the original design reserved `pending_approval` for,
 now actually wired up rather than just reserved.
 
-Pipeline/stage create-update-delete are the one category **not** in the
-registry at all: this deployment's GoHighLevel Private Integration Token
-has pipelines *read* but not *write* scope (confirmed live — a create
-attempt returns `401 The token is not authorized for this scope`), so
-those actions are omitted rather than pretended to work. See the README's
-[GHL scopes](../README.md#ghl-scopes) section for how to grant that scope.
-If a destructive action is ever added, it must go through an explicit
-propose → human approval → execute gate; `automation_actions.status`
-already has a `pending_approval` value reserved for this, unused by any
-action today.
+Pipeline create/update/delete and stage create/update/delete are in the
+registry too, once this deployment's GoHighLevel Private Integration Token
+was granted pipeline write scope (an earlier probe with read-only scope
+returned `401 The token is not authorized for this scope` on create) — see
+the README's [GHL scopes](../README.md#ghl-scopes) section. One real API
+quirk surfaced live doing this: `PUT /opportunities/pipelines/:id`
+replaces the pipeline's `stages` array wholesale and crashes if it's
+omitted, so adding/renaming/removing a single stage requires fetching the
+current pipeline first and sending the complete merged stage list back —
+`lib/orchestration/resolvers.ts`'s `resolvePipelineMutation` is the one
+place that does this merge; `lib/ghl/client.ts`'s `updatePipeline` never
+merges on its own, it only ever sends exactly what it's given.
 
 ## Orchestration pipeline (`lib/orchestration/execute.ts`)
 

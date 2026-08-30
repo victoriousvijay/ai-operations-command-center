@@ -146,11 +146,15 @@ their opportunity, and add a tag" becomes three actions).
 | "Find my conversation with Rahul" | `SEARCH_CONVERSATIONS` / `GET_CONVERSATION` |
 | "Send Rahul a text saying..." *(confirmation required — real message)* | `SEND_MESSAGE` |
 | "List calendars" | `LIST_CALENDARS` |
+| "Create a new pipeline called Solar Leads with stages New Lead, Contacted, Qualified, Proposal, Won" | `CREATE_PIPELINE` |
+| "Rename the Solar Leads pipeline to Solar Deals" | `UPDATE_PIPELINE` |
+| "Delete the Solar Leads pipeline" *(confirmation required)* | `DELETE_PIPELINE` |
+| "Add a Proposal Sent stage to Solar Leads" | `CREATE_PIPELINE_STAGE` |
+| "Rename the Qualified stage to Hot Lead" | `UPDATE_PIPELINE_STAGE` |
+| "Remove the Contacted stage from Solar Leads" *(confirmation required)* | `DELETE_PIPELINE_STAGE` |
 
-**Not supported** (see [GHL scopes](#ghl-scopes) — this token has
-pipeline *read* but not *write* access): creating/renaming/deleting a
-pipeline or its stages. Asking for this gives a clear "missing scope"
-error rather than silently failing or pretending to succeed.
+**Not supported**: scheduling appointments — this GoHighLevel location has
+no calendar configured yet (see the registry table below).
 
 ## Controlled action registry
 
@@ -173,7 +177,9 @@ exactly how each endpoint below was verified live before being wired in.
 | `CREATE_OPPORTUNITY`, `UPDATE_OPPORTUNITY` | mutating | ✅ live-verified |
 | `DELETE_OPPORTUNITY` | **destructive — needs confirm** | ✅ live-verified |
 | `LIST_PIPELINES` | read-only | ✅ live-verified |
-| `CREATE_PIPELINE` / `UPDATE_PIPELINE` / `DELETE_PIPELINE` / stage CRUD | — | ❌ **blocked** — this Private Integration Token has pipelines *read* only, not *write* (a live create attempt returns `401 The token is not authorized for this scope`) |
+| `CREATE_PIPELINE` | mutating | ✅ live-verified |
+| `UPDATE_PIPELINE`, `CREATE_PIPELINE_STAGE`, `UPDATE_PIPELINE_STAGE` | mutating | ✅ live-verified (create → rename pipeline → add/rename stage → delete round-trip) |
+| `DELETE_PIPELINE`, `DELETE_PIPELINE_STAGE` | **destructive — needs confirm** | ✅ live-verified |
 | `LIST_TASKS`, `GET_TASK` | read-only | ✅ live-verified |
 | `CREATE_TASK`, `UPDATE_TASK` | mutating | ✅ live-verified |
 | `DELETE_TASK` | **destructive — needs confirm** | ✅ live-verified |
@@ -195,20 +201,22 @@ implemented**:
 |---|---|---|
 | Contacts (read/write) | search, create, update, delete, tag contacts | all `*_CONTACT` actions |
 | Opportunities (read/write) | search, create, update, delete opportunities | all `*_OPPORTUNITY` actions |
-| Pipelines (**read only, currently**) | list pipelines/stages to resolve a stage name to a real ID | `LIST_PIPELINES`, stage-name resolution |
+| Pipelines (read/write) | list, create, rename, delete pipelines and stages | `LIST_PIPELINES`, all `*_PIPELINE*` actions |
 | Tasks (read/write) | list/create/update/delete follow-up tasks | all `*_TASK` actions |
 | Notes (write) | add notes to a contact | `ADD_NOTE` |
 | Custom Fields (read/write) | list/create/update/delete custom fields | all `*_CUSTOM_FIELD` actions |
 | Conversations (read, message write) | search conversations, send messages | `SEARCH_CONVERSATIONS`, `GET_CONVERSATION`, `SEND_MESSAGE` |
 | Calendars (read) | list calendars | `LIST_CALENDARS` |
 
-**To add pipeline write access** (create/update/delete pipelines and
-stages): in GoHighLevel, go to **Settings → Private Integrations**, edit
-this project's integration, and enable the **Opportunities/Pipelines
-write** permission, then save (no new token needed unless GHL requires
-regeneration). Nothing in the code needs to change — `lib/ghl/client.ts`
-already has commented guidance for exactly what to add once this scope
-exists.
+Pipeline write access was granted after initial development and
+re-verified live (create → rename + add a stage → delete round-trip
+against a real, throwaway test pipeline) — see [`lib/ghl/client.ts`](./lib/ghl/client.ts)
+for the one real API quirk found doing that: `PUT
+/opportunities/pipelines/:id` requires the **full** `stages` array on
+every call, so adding/renaming/removing one stage means fetching the
+current pipeline and sending the complete merged list back (never a
+partial patch) — see `lib/orchestration/resolvers.ts`'s
+`resolvePipelineMutation`.
 
 **Never** the Bearer Auth credential from a different project — this app
 uses its own dedicated `Header Auth account 2` credential in n8n and its
@@ -469,12 +477,16 @@ required (all env access is lazy, inside request handlers).
    GHL update → Supabase audit log, live in the dashboard.
 2. **"Create a follow-up task for Olivia tomorrow."** — a second,
    independent action against the same resolved contact.
-3. Upload **`test-leads.csv`** — shows the file → parse → review screen
+3. **"Create a new pipeline called Solar Leads with stages New Lead,
+   Contacted, Qualified, Proposal and Won."** — shows a real pipeline
+   created live in GoHighLevel with all five stages, then **"List all
+   pipelines"** to show it's really there.
+4. Upload **`test-leads.csv`** — shows the file → parse → review screen
    (per-row status, duplicate-email warning) → Approve & Execute → real
    batch result (`Total/Successful/Failed`).
-4. Upload **`test-workflow.md`** — shows a Markdown runbook converging on
+5. Upload **`test-workflow.md`** — shows a Markdown runbook converging on
    the same action plan a typed command would produce.
-5. **Multi-action + confirmation**: ask it to delete a test contact —
+6. **Multi-action + confirmation**: ask it to delete a test contact —
    shows the `awaiting_confirmation` gate blocking execution, then approve
    it and show the contact is actually gone in GoHighLevel.
 

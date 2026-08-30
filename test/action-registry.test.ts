@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { ALLOWED_ACTIONS, MUTATION_TIER } from "../lib/actions/allowlist";
 import { buildGhlRequest } from "../lib/actions/registry";
 import { MockN8nClient, attachGhlRequest } from "../lib/n8n/client";
-import { resolveOpportunityId, resolvePipelineStage } from "../lib/orchestration/resolvers";
+import { resolveOpportunityId, resolvePipelineMutation, resolvePipelineStage } from "../lib/orchestration/resolvers";
 import type { GhlClient, GhlOpportunity, GhlPipeline } from "../lib/ghl/types";
 
 function notUsed(): never {
@@ -33,6 +33,10 @@ function fakeGhlClient(overrides: Partial<GhlClient>): GhlClient {
     updateOpportunity: notUsed,
     deleteOpportunity: notUsed,
     listPipelines: notUsed,
+    getPipeline: notUsed,
+    createPipeline: notUsed,
+    updatePipeline: notUsed,
+    deletePipeline: notUsed,
     listTasks: notUsed,
     getTask: notUsed,
     createTask: notUsed,
@@ -65,6 +69,9 @@ test("every allowed action has a mutation tier and a working GHL request builder
       conversationId: "conv1",
       tags: ["hot-lead"],
       query: "Rahul",
+      pipelineId: "p1",
+      name: "Solar Leads",
+      stages: [{ id: "s1", name: "New Lead", position: 0 }],
     });
     assert.ok(request.method, `${action} did not produce a method`);
     assert.ok(request.path, `${action} did not produce a path`);
@@ -193,4 +200,76 @@ test("mock n8n dispatches CREATE_CONTACT, ADD_CONTACT_TAG, and LIST_PIPELINES th
   assert.equal(pipelines.ok, true);
   assert.ok(Array.isArray(pipelines.response?.pipelines));
   delete process.env.GHL_LOCATION_ID;
+});
+
+const SOLAR_PIPELINE_FULL: GhlPipeline = {
+  id: "pipe-solar",
+  name: "Solar Leads",
+  stages: [
+    { id: "stage-new", name: "New Lead", position: 0 },
+    { id: "stage-qualified", name: "Qualified", position: 1 },
+  ],
+};
+
+test("resolvePipelineMutation resolves a pipeline by name and preserves stages on UPDATE_PIPELINE", async () => {
+  const ghl = fakeGhlClient({
+    listPipelines: async () => [SOLAR_PIPELINE_FULL],
+    getPipeline: async (id) => (id === "pipe-solar" ? SOLAR_PIPELINE_FULL : notUsed()),
+  });
+  const result = await resolvePipelineMutation(ghl, "UPDATE_PIPELINE", { pipelineNameHint: "Solar Leads", name: "Solar Deals" });
+  assert.equal(result.error, undefined);
+  assert.equal(result.payload.pipelineId, "pipe-solar");
+  assert.equal(result.payload.name, "Solar Deals");
+  assert.deepEqual(result.payload.stages, [
+    { id: "stage-new", name: "New Lead", position: 0 },
+    { id: "stage-qualified", name: "Qualified", position: 1 },
+  ]);
+});
+
+test("resolvePipelineMutation appends a new stage without dropping existing ones (CREATE_PIPELINE_STAGE)", async () => {
+  const ghl = fakeGhlClient({ getPipeline: async () => SOLAR_PIPELINE_FULL });
+  const result = await resolvePipelineMutation(ghl, "CREATE_PIPELINE_STAGE", { pipelineId: "pipe-solar", stageName: "Proposal Sent" });
+  assert.equal(result.error, undefined);
+  const stages = result.payload.stages as Array<{ name: string }>;
+  assert.equal(stages.length, 3);
+  assert.equal(stages[0]!.name, "New Lead");
+  assert.equal(stages[1]!.name, "Qualified");
+  assert.equal(stages[2]!.name, "Proposal Sent");
+});
+
+test("resolvePipelineMutation renames one stage in place (UPDATE_PIPELINE_STAGE)", async () => {
+  const ghl = fakeGhlClient({ getPipeline: async () => SOLAR_PIPELINE_FULL });
+  const result = await resolvePipelineMutation(ghl, "UPDATE_PIPELINE_STAGE", {
+    pipelineId: "pipe-solar",
+    stageNameHint: "Qualified",
+    newStageName: "Hot Lead",
+  });
+  assert.equal(result.error, undefined);
+  const stages = result.payload.stages as Array<{ name: string }>;
+  assert.equal(stages.length, 2);
+  assert.equal(stages[0]!.name, "New Lead");
+  assert.equal(stages[1]!.name, "Hot Lead");
+});
+
+test("resolvePipelineMutation removes one stage and renumbers the rest (DELETE_PIPELINE_STAGE)", async () => {
+  const ghl = fakeGhlClient({ getPipeline: async () => SOLAR_PIPELINE_FULL });
+  const result = await resolvePipelineMutation(ghl, "DELETE_PIPELINE_STAGE", { pipelineId: "pipe-solar", stageNameHint: "New Lead" });
+  assert.equal(result.error, undefined);
+  const stages = result.payload.stages as Array<{ name: string; position: number }>;
+  assert.equal(stages.length, 1);
+  assert.equal(stages[0]!.name, "Qualified");
+  assert.equal(stages[0]!.position, 0);
+});
+
+test("resolvePipelineMutation errors clearly (lists real pipelines) when no pipeline matches", async () => {
+  const ghl = fakeGhlClient({ listPipelines: async () => [SOLAR_PIPELINE_FULL] });
+  const result = await resolvePipelineMutation(ghl, "DELETE_PIPELINE", { pipelineNameHint: "Nonexistent Pipeline" });
+  assert.match(result.error ?? "", /No pipeline found matching/);
+  assert.match(result.error ?? "", /Solar Leads/);
+});
+
+test("resolvePipelineMutation errors clearly when no stage matches (never guesses)", async () => {
+  const ghl = fakeGhlClient({ getPipeline: async () => SOLAR_PIPELINE_FULL });
+  const result = await resolvePipelineMutation(ghl, "DELETE_PIPELINE_STAGE", { pipelineId: "pipe-solar", stageNameHint: "Nonexistent Stage" });
+  assert.match(result.error ?? "", /No stage found matching/);
 });

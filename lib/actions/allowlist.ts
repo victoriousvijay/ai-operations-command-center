@@ -17,17 +17,18 @@
  * Only actions verified live against this project's own GoHighLevel
  * Private Integration Token are listed here — see MUTATION_TIER below and
  * lib/actions/registry.ts's per-action comments for what was verified and
- * how. Actions that exist in GHL's API but are NOT reachable with the
- * currently granted scopes (pipeline create/update/delete, pipeline stage
- * create/update/delete — this token has pipelines READ but not WRITE) are
- * intentionally left out rather than pretended to work. See README.md's
- * "GHL scopes" section for exactly what is missing and how to grant it.
+ * how. Pipeline create/update/delete were blocked by scope until this
+ * token was granted pipeline write access — verified live afterward with a
+ * real create → rename+add-stage → delete round-trip (see
+ * lib/ghl/client.ts's class doc comment for the one real API quirk found
+ * doing that: PUT requires the full stages array every time).
  *
  * Destructive actions (DELETE_CONTACT, DELETE_OPPORTUNITY, DELETE_TASK,
- * DELETE_CUSTOM_FIELD) are included, but MUTATION_TIER marks them
- * "destructive" — lib/orchestration/execute.ts refuses to run them without
- * an explicit confirm:true from the caller (see the confirmation flow in
- * that file and in app/components/Dashboard.tsx).
+ * DELETE_CUSTOM_FIELD, DELETE_PIPELINE, DELETE_PIPELINE_STAGE) are
+ * included, but MUTATION_TIER marks them "destructive" —
+ * lib/orchestration/execute.ts refuses to run them without an explicit
+ * confirm:true from the caller (see the confirmation flow in that file and
+ * in app/components/Dashboard.tsx).
  */
 export const ALLOWED_ACTIONS = [
   // Contacts
@@ -45,8 +46,14 @@ export const ALLOWED_ACTIONS = [
   "CREATE_OPPORTUNITY",
   "UPDATE_OPPORTUNITY",
   "DELETE_OPPORTUNITY",
-  // Pipelines (read-only — see comment above)
+  // Pipelines
   "LIST_PIPELINES",
+  "CREATE_PIPELINE",
+  "UPDATE_PIPELINE",
+  "DELETE_PIPELINE",
+  "CREATE_PIPELINE_STAGE",
+  "UPDATE_PIPELINE_STAGE",
+  "DELETE_PIPELINE_STAGE",
   // Tasks
   "LIST_TASKS",
   "GET_TASK",
@@ -102,6 +109,14 @@ export const MUTATION_TIER: Record<AllowedAction, "readonly" | "mutating" | "des
   DELETE_OPPORTUNITY: "destructive",
 
   LIST_PIPELINES: "readonly",
+  CREATE_PIPELINE: "mutating",
+  UPDATE_PIPELINE: "mutating",
+  DELETE_PIPELINE: "destructive",
+  CREATE_PIPELINE_STAGE: "mutating",
+  UPDATE_PIPELINE_STAGE: "mutating",
+  // Removing a stage can strand opportunities that were sitting in it —
+  // treat as destructive even though it isn't a delete of the pipeline itself.
+  DELETE_PIPELINE_STAGE: "destructive",
 
   LIST_TASKS: "readonly",
   GET_TASK: "readonly",

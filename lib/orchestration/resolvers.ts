@@ -1,5 +1,5 @@
 import "server-only";
-import type { GhlClient } from "@/lib/ghl/types";
+import type { GhlClient, GhlPipeline } from "@/lib/ghl/types";
 import { SYNTHETIC_CONTACT_PREFIX } from "@/lib/agent/mock-adapter";
 
 type Resolved = { payload: Record<string, unknown>; error?: string };
@@ -158,4 +158,96 @@ export async function resolvePipelineStage(ghl: GhlClient, payload: Record<strin
 
   const best = matches[0]!;
   return { payload: { ...rest, pipelineId: best.pipelineId, pipelineStageId: best.stageId } };
+}
+
+type PipelineMutationAction = "UPDATE_PIPELINE" | "CREATE_PIPELINE_STAGE" | "UPDATE_PIPELINE_STAGE" | "DELETE_PIPELINE_STAGE" | "DELETE_PIPELINE";
+
+type StageRow = { id?: string; name: string; position: number };
+
+/**
+ * Resolves a pipeline-mutation action's pipeline (by ID or name hint) and,
+ * for anything that touches stages, fetches the CURRENT full pipeline and
+ * computes the complete merged `stages` array GoHighLevel's PUT requires —
+ * see lib/ghl/client.ts's class doc comment for why a partial stages patch
+ * isn't possible (PUT replaces the array wholesale and crashes if it's
+ * omitted). Never invents a pipeline or stage: an unmatched or ambiguous
+ * name hint is a clear error, never a guess.
+ */
+export async function resolvePipelineMutation(
+  ghl: GhlClient,
+  actionType: PipelineMutationAction,
+  payload: Record<string, unknown>,
+): Promise<Resolved> {
+  const { pipelineNameHint, stageNameHint, ...rest } = payload;
+  let pipelineId = rest.pipelineId as string | undefined;
+
+  if (!pipelineId) {
+    if (typeof pipelineNameHint !== "string" || !pipelineNameHint) {
+      return { payload: rest, error: "No pipelineId was given and there is no pipeline name to look it up by." };
+    }
+    const pipelines = await ghl.listPipelines();
+    const nameLower = pipelineNameHint.toLowerCase();
+    const matches = pipelines.filter((p) => p.name.toLowerCase().includes(nameLower));
+    if (matches.length === 0) {
+      const available = pipelines.map((p) => p.name).join(", ") || "none configured";
+      return { payload: rest, error: `No pipeline found matching "${pipelineNameHint}". Available pipelines: ${available}.` };
+    }
+    if (matches.length > 1) {
+      return { payload: rest, error: `Multiple pipelines match "${pipelineNameHint}": ${matches.map((p) => p.name).join(", ")}. Please be more specific.` };
+    }
+    pipelineId = matches[0]!.id;
+  }
+
+  if (actionType === "DELETE_PIPELINE") {
+    return { payload: { ...rest, pipelineId } };
+  }
+
+  let pipeline: GhlPipeline;
+  try {
+    pipeline = await ghl.getPipeline(pipelineId);
+  } catch (error) {
+    return { payload: rest, error: `Could not load pipeline "${pipelineId}": ${error instanceof Error ? error.message : "unknown error"}` };
+  }
+
+  const asStageRows = (): StageRow[] => pipeline.stages.map((s) => ({ id: s.id, name: s.name, position: s.position }));
+
+  if (actionType === "UPDATE_PIPELINE") {
+    return { payload: { ...rest, pipelineId, name: (rest.name as string | undefined) ?? pipeline.name, stages: asStageRows() } };
+  }
+
+  if (actionType === "CREATE_PIPELINE_STAGE") {
+    const stageName = rest.stageName as string | undefined;
+    if (!stageName) return { payload: rest, error: "CREATE_PIPELINE_STAGE requires a stage name." };
+    const stages: StageRow[] = [...asStageRows(), { name: stageName, position: pipeline.stages.length }];
+    return { payload: { ...rest, pipelineId, name: pipeline.name, stages } };
+  }
+
+  // UPDATE_PIPELINE_STAGE / DELETE_PIPELINE_STAGE both need to find one existing stage first.
+  const stageId = rest.stageId as string | undefined;
+  const stageLower = typeof stageNameHint === "string" ? stageNameHint.toLowerCase() : undefined;
+  const stageMatches = pipeline.stages.filter((s) =>
+    stageId ? s.id === stageId : stageLower ? s.name.toLowerCase().includes(stageLower) : false,
+  );
+
+  if (stageMatches.length === 0) {
+    const available = pipeline.stages.map((s) => s.name).join(", ") || "none";
+    return { payload: rest, error: `No stage found matching "${stageNameHint ?? stageId}" in pipeline "${pipeline.name}". Available stages: ${available}.` };
+  }
+  if (stageMatches.length > 1) {
+    return { payload: rest, error: `"${stageNameHint}" matches multiple stages in "${pipeline.name}": ${stageMatches.map((s) => s.name).join(", ")}. Please be more specific.` };
+  }
+  const targetStageId = stageMatches[0]!.id;
+
+  if (actionType === "UPDATE_PIPELINE_STAGE") {
+    const newStageName = rest.newStageName as string | undefined;
+    if (!newStageName) return { payload: rest, error: "UPDATE_PIPELINE_STAGE requires a newStageName." };
+    const stages: StageRow[] = asStageRows().map((s) => (s.id === targetStageId ? { ...s, name: newStageName } : s));
+    return { payload: { ...rest, pipelineId, name: pipeline.name, stages } };
+  }
+
+  // DELETE_PIPELINE_STAGE
+  const stages: StageRow[] = asStageRows()
+    .filter((s) => s.id !== targetStageId)
+    .map((s, i) => ({ ...s, position: i }));
+  return { payload: { ...rest, pipelineId, name: pipeline.name, stages } };
 }

@@ -59,6 +59,12 @@ export const WORKFLOW_BY_ACTION: Record<AllowedAction, string> = {
   UPDATE_OPPORTUNITY: "ghl-opportunity-workflow",
   DELETE_OPPORTUNITY: "ghl-opportunity-workflow",
   LIST_PIPELINES: "ghl-opportunity-workflow",
+  CREATE_PIPELINE: "ghl-opportunity-workflow",
+  UPDATE_PIPELINE: "ghl-opportunity-workflow",
+  DELETE_PIPELINE: "ghl-opportunity-workflow",
+  CREATE_PIPELINE_STAGE: "ghl-opportunity-workflow",
+  UPDATE_PIPELINE_STAGE: "ghl-opportunity-workflow",
+  DELETE_PIPELINE_STAGE: "ghl-opportunity-workflow",
 
   LIST_TASKS: "ghl-task-workflow",
   GET_TASK: "ghl-task-workflow",

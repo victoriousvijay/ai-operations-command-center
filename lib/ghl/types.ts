@@ -143,6 +143,28 @@ export interface SearchOpportunitiesInput {
   query?: string;
 }
 
+// ── Pipelines ───────────────────────────────────────────────────────────
+export interface CreatePipelineInput {
+  name: string;
+  stages: Array<{ name: string }>;
+}
+
+/**
+ * `stages` is REQUIRED here, always the FULL desired stage list — not a
+ * partial patch. GoHighLevel's PUT replaces the pipeline's stages wholesale
+ * and throws `Cannot read properties of undefined (reading 'map')` if
+ * `stages` is omitted (confirmed live). Adding/renaming/removing a single
+ * stage means fetching the current pipeline, computing the full new array,
+ * and sending that — see lib/orchestration/resolvers.ts's
+ * resolvePipelineMutation, which is the only place that does this merge.
+ * This client method never merges on its own; it sends exactly what it's given.
+ */
+export interface UpdatePipelineInput {
+  pipelineId: string;
+  name: string;
+  stages: Array<{ id?: string; name: string; position: number }>;
+}
+
 // ── Tasks / notes ───────────────────────────────────────────────────────
 export interface CreateTaskInput {
   contactId: string;
@@ -208,8 +230,12 @@ export interface GhlClient {
   updateOpportunity(input: UpdateOpportunityInput): Promise<GhlOpportunity>;
   deleteOpportunity(opportunityId: string): Promise<{ success: true }>;
 
-  // Pipelines (read-only)
+  // Pipelines
   listPipelines(): Promise<GhlPipeline[]>;
+  getPipeline(pipelineId: string): Promise<GhlPipeline>;
+  createPipeline(input: CreatePipelineInput): Promise<GhlPipeline>;
+  updatePipeline(input: UpdatePipelineInput): Promise<GhlPipeline>;
+  deletePipeline(pipelineId: string): Promise<{ success: true }>;
 
   // Tasks
   listTasks(contactId: string): Promise<GhlTask[]>;

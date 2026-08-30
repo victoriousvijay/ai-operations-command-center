@@ -88,6 +88,27 @@ export function buildGhlRequest(
 
     case "LIST_PIPELINES":
       return { method: "GET", path: `/opportunities/pipelines?locationId=${locationId()}` };
+    case "CREATE_PIPELINE": {
+      // GHL requires a numeric `position` on every stage (confirmed live —
+      // omitting it returns 422 "stages.N.position should not be empty").
+      // The caller only supplies names, so number them here.
+      const stages = Array.isArray(p.stages)
+        ? (p.stages as Array<{ name: string }>).map((s, i) => ({ name: s.name, position: i }))
+        : p.stages;
+      return { method: "POST", path: "/opportunities/pipelines", body: { locationId: locationId(), name: p.name, stages } };
+    }
+    // UPDATE_PIPELINE, CREATE_PIPELINE_STAGE, UPDATE_PIPELINE_STAGE, and
+    // DELETE_PIPELINE_STAGE all resolve to the same PUT shape — by the
+    // time this runs, resolvePipelineMutation (lib/orchestration/
+    // resolvers.ts) has already fetched the current pipeline and computed
+    // the full merged `stages` array GHL's PUT requires; this just sends it.
+    case "UPDATE_PIPELINE":
+    case "CREATE_PIPELINE_STAGE":
+    case "UPDATE_PIPELINE_STAGE":
+    case "DELETE_PIPELINE_STAGE":
+      return { method: "PUT", path: `/opportunities/pipelines/${p.pipelineId}`, body: { name: p.name, stages: p.stages } };
+    case "DELETE_PIPELINE":
+      return { method: "DELETE", path: `/opportunities/pipelines/${p.pipelineId}` };
 
     case "LIST_TASKS":
       return { method: "GET", path: `/contacts/${p.contactId}/tasks` };
