@@ -1,0 +1,58 @@
+{
+  "name": "execution-logger-workflow",
+  "active": false,
+  "nodes": [
+    {
+      "id": "01e2430e-c323-42b2-a334-0a0445d6cae0",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            { "name": "requestId", "type": "string" },
+            { "name": "actionId", "type": "string" },
+            { "name": "workflowName", "type": "string" },
+            { "name": "status", "type": "string" },
+            { "name": "errorMessage", "type": "string" },
+            { "name": "durationMs", "type": "number" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "60207b18-7f28-4262-a9e0-fd320a23baee",
+      "name": "Insert into execution_logs",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [224, 0],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "execution_logs",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "request_id", "fieldValue": "={{ $json.requestId }}" },
+            { "fieldId": "action_id", "fieldValue": "={{ $json.actionId }}" },
+            { "fieldId": "workflow_name", "fieldValue": "={{ $json.workflowName }}" },
+            { "fieldId": "status", "fieldValue": "={{ $json.status }}" },
+            { "fieldId": "error_message", "fieldValue": "={{ $json.errorMessage || null }}" },
+            { "fieldId": "duration_ms", "fieldValue": "={{ $json.durationMs || null }}" }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": { "id": "REPLACE_WITH_CREDENTIAL_ID", "name": "Supabase" }
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [[{ "node": "Insert into execution_logs", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

@@ -1,0 +1,151 @@
+{
+  "name": "ghl-task-workflow",
+  "active": false,
+  "nodes": [
+    {
+      "id": "6ff7604e-8027-48a2-93d8-9f41319f6530",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 96],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ghl-task-workflow",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "79d140cd-93dc-4e4d-a6db-ef10222e0cc3",
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_WITH_CREDENTIAL_ID", "name": "n8n Webhook Shared Secret" }
+      }
+    },
+    {
+      "id": "d6939cf8-5bcc-4fb7-9a38-432cc43e0c65",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [224, 96],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const item = $input.first().json;\nconst body = item.body ?? item;\nconst requestId = body.requestId;\nconst actionId = body.actionId;\nconst actionType = body.actionType;\nconst payload = body.payload;\n\nif (!requestId || !actionId || !actionType || !payload) {\n  throw new Error(\"Missing requestId, actionId, actionType, or payload.\");\n}\nif (actionType !== \"CREATE_TASK\" && actionType !== \"ADD_NOTE\") {\n  throw new Error(\"ghl-task-workflow does not handle action type \" + actionType);\n}\nif (!payload.contactId) {\n  throw new Error(\"payload.contactId is required.\");\n}\nif (actionType === \"CREATE_TASK\" && (!payload.title || !payload.dueDate)) {\n  throw new Error(\"payload.title and payload.dueDate are required for CREATE_TASK.\");\n}\nif (actionType === \"ADD_NOTE\" && !payload.body) {\n  throw new Error(\"payload.body is required for ADD_NOTE.\");\n}\n\nreturn [{ json: { requestId: requestId, actionId: actionId, actionType: actionType, payload: payload } }];"
+      }
+    },
+    {
+      "id": "55b544fd-5298-4b57-9853-326578b8c4aa",
+      "name": "Is CREATE_TASK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [448, 96],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            { "leftValue": "={{ $json.actionType }}", "rightValue": "CREATE_TASK", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "342330bd-286f-4a2f-81ed-6ee6052b3716",
+      "name": "POST Task (GHL)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [672, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $json.payload.contactId }}/tasks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Version", "value": "2021-07-28" }] },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { title: $json.payload.title, body: $json.payload.body, dueDate: $json.payload.dueDate, completed: false, assignedTo: $json.payload.assignedTo } }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_WITH_CREDENTIAL_ID", "name": "GoHighLevel Bearer Token" }
+      }
+    },
+    {
+      "id": "3a418bee-724a-4845-b615-32f569c19e69",
+      "name": "Log Execution",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [896, 96],
+      "parameters": {
+        "mode": "once",
+        "source": "database",
+        "workflowId": { "__rl": true, "mode": "id", "value": "l1AmbDI9rZG36jGx", "cachedResultName": "execution-logger-workflow" },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "requestId": "={{ $('Validate Input').item.json.requestId }}",
+            "actionId": "={{ $('Validate Input').item.json.actionId }}",
+            "workflowName": "ghl-task-workflow",
+            "status": "success",
+            "errorMessage": "",
+            "durationMs": 0
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "requestId", "displayName": "requestId", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "actionId", "displayName": "actionId", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "workflowName", "displayName": "workflowName", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "status", "displayName": "status", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "errorMessage", "displayName": "errorMessage", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "durationMs", "displayName": "durationMs", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "number" }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        }
+      }
+    },
+    {
+      "id": "07246e59-a0e8-44dc-9f31-71e5c88093ef",
+      "name": "POST Note (GHL)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [672, 192],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $json.payload.contactId }}/notes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Version", "value": "2021-07-28" }] },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { body: $json.payload.body, userId: $json.payload.userId } }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_WITH_CREDENTIAL_ID", "name": "GoHighLevel Bearer Token" }
+      }
+    },
+    {
+      "id": "33cda981-1da1-40ba-a220-e639fc381345",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1120, 96],
+      "parameters": { "respondWith": "json", "responseBody": "={{ { ok: true, response: $json } }}" }
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Validate Input", "type": "main", "index": 0 }]] },
+    "Validate Input": { "main": [[{ "node": "Is CREATE_TASK?", "type": "main", "index": 0 }]] },
+    "Is CREATE_TASK?": {
+      "main": [
+        [{ "node": "POST Task (GHL)", "type": "main", "index": 0 }],
+        [{ "node": "POST Note (GHL)", "type": "main", "index": 0 }]
+      ]
+    },
+    "POST Task (GHL)": { "main": [[{ "node": "Log Execution", "type": "main", "index": 0 }]] },
+    "POST Note (GHL)": { "main": [[{ "node": "Log Execution", "type": "main", "index": 0 }]] },
+    "Log Execution": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
