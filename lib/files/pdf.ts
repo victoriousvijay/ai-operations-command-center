@@ -1,5 +1,4 @@
 import "server-only";
-import { PDFParse } from "pdf-parse";
 import { planFromTextLines } from "./text-plan";
 import type { FileParseResult } from "./types";
 
@@ -10,10 +9,18 @@ import type { FileParseResult } from "./types";
  * SAME shared text-instruction planner Markdown uses (text-plan.ts) — no
  * separate PDF business logic, per ARCHITECTURE.md's "one system, two
  * input methods" principle.
+ *
+ * `pdf-parse` is imported dynamically, not at module scope: its
+ * `pdfjs-dist` dependency evaluates canvas/DOMMatrix polyfill code as soon
+ * as it loads, which behaves differently across Node runtimes (it needed
+ * the optional `@napi-rs/canvas` package to work at all on Vercel's
+ * serverless runtime, confirmed by a live production failure). Loading it
+ * lazily means a CSV or Markdown upload never touches that code path.
  */
 export async function parsePdfFile(fileName: string, buffer: Buffer): Promise<FileParseResult> {
   let text: string;
   try {
+    const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse({ data: new Uint8Array(buffer) });
     const result = await parser.getText();
     text = result.text;
