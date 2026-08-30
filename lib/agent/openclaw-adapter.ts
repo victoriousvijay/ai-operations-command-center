@@ -4,13 +4,16 @@ import { ALLOWED_ACTIONS, isAllowedAction, type AllowedAction } from "@/lib/acti
 import type { AgentProposal, ProposedAction } from "@/lib/types/domain";
 import type { AgentAdapter } from "./types";
 
+const CONTACT_ID_NOTE =
+  " If you don't know the real GoHighLevel contactId, leave contactId empty and set contactLookupHint to the person's name or email instead — it will be resolved to a real contact before this runs. Never invent a contactId.";
+
 const ACTION_DESCRIPTIONS: Record<AllowedAction, string> = {
-  GET_CONTACT: "Look up a GoHighLevel contact by id.",
+  GET_CONTACT: `Look up a GoHighLevel contact by id.${CONTACT_ID_NOTE}`,
   GET_OPPORTUNITY: "Look up a GoHighLevel opportunity by id.",
-  UPDATE_CONTACT: "Update a GoHighLevel contact's fields (name, email, phone, tags).",
+  UPDATE_CONTACT: `Update a GoHighLevel contact's fields (name, email, phone, tags).${CONTACT_ID_NOTE}`,
   UPDATE_OPPORTUNITY: "Update a GoHighLevel opportunity, e.g. move it to a new pipeline stage.",
-  CREATE_TASK: "Create a follow-up task on a GoHighLevel contact.",
-  ADD_NOTE: "Add a note to a GoHighLevel contact.",
+  CREATE_TASK: `Create a follow-up task on a GoHighLevel contact.${CONTACT_ID_NOTE}`,
+  ADD_NOTE: `Add a note to a GoHighLevel contact.${CONTACT_ID_NOTE}`,
 };
 
 function buildToolSchema() {
@@ -21,7 +24,14 @@ function buildToolSchema() {
     parameters: {
       type: "object",
       properties: {
-        contactId: { type: "string" },
+        contactId: {
+          type: "string",
+          description: "The real GoHighLevel contact ID, only if already known. Leave empty otherwise.",
+        },
+        contactLookupHint: {
+          type: "string",
+          description: "The contact's name or email, used to look up their real contactId when it isn't already known.",
+        },
         opportunityId: { type: "string" },
         firstName: { type: "string" },
         lastName: { type: "string" },

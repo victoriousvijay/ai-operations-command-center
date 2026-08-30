@@ -4,6 +4,7 @@ import type { N8nClient } from "./types";
 
 export * from "./types";
 export { validatePayload, payloadSchemas } from "./validation";
+export { resolveContactId } from "./client";
 
 let cached: N8nClient | null = null;
 

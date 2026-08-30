@@ -1,7 +1,8 @@
 import "server-only";
 import { isAllowedAction } from "@/lib/actions/allowlist";
 import { getAgentAdapter } from "@/lib/agent";
-import { getN8nClient } from "@/lib/n8n";
+import { getGhlClient } from "@/lib/ghl";
+import { getN8nClient, resolveContactId } from "@/lib/n8n";
 import {
   createAutomationAction,
   createAutomationRequest,
@@ -129,10 +130,42 @@ export async function executeAutomationRequest(params: {
       continue;
     }
 
-    const payload =
+    let payload =
       params.contactIdOverride && CONTACT_ACTION_TYPES.has(proposed.type)
         ? { ...proposed.payload, contactId: params.contactIdOverride }
         : proposed.payload;
+
+    // Resolve a name/email hint (from either adapter — the mock agent's
+    // synthesized placeholder, or a real agent that left contactId empty
+    // and set contactLookupHint) to a real GoHighLevel contact ID here,
+    // once, before dispatch — so both the mock and real n8n adapters
+    // always receive an already-resolved contactId. Real n8n workflows
+    // have no resolution step of their own and would otherwise reject an
+    // empty contactId at their input-validation stage.
+    if (CONTACT_ACTION_TYPES.has(proposed.type)) {
+      const resolved = await resolveContactId(getGhlClient(), payload);
+      if (resolved.error) {
+        const action = await createAutomationAction({
+          requestId: request.id,
+          actionType: proposed.type,
+          payload,
+        });
+        await createExecutionLog({
+          requestId: request.id,
+          actionId: action.id,
+          workflowName: "contact-resolution",
+          status: "failed",
+          errorMessage: resolved.error,
+        });
+        await updateAutomationAction(action.id, {
+          status: "failed",
+          response: { error: resolved.error },
+        });
+        results.push({ type: proposed.type, status: "failed", error: resolved.error });
+        continue;
+      }
+      payload = resolved.payload;
+    }
 
     const action = await createAutomationAction({
       requestId: request.id,
