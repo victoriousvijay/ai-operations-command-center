@@ -10,6 +10,9 @@
 # production
 /build
 
+# vercel
+.vercel
+
 # env files — never commit real secrets
 .env
 .env.local
@@ -36,3 +39,4 @@ next-env.d.ts
 # allowlist that can end up echoing secrets used in Bash/tool calls
 # (e.g. curl commands run against real API tokens during setup).
 .claude/settings.local.json
+.env*
