@@ -1,5 +1,5 @@
 import "server-only";
-import type { GhlClient, GhlPipeline } from "@/lib/ghl/types";
+import { GhlApiError, type GhlClient, type GhlPipeline } from "@/lib/ghl/types";
 import { SYNTHETIC_CONTACT_PREFIX } from "@/lib/agent/mock-adapter";
 
 type Resolved = { payload: Record<string, unknown>; error?: string };
@@ -250,4 +250,49 @@ export async function resolvePipelineMutation(
     .filter((s) => s.id !== targetStageId)
     .map((s, i) => ({ ...s, position: i }));
   return { payload: { ...rest, pipelineId, name: pipeline.name, stages } };
+}
+
+/**
+ * Resolves ASSIGN_LEAD's target user. A real, already-known
+ * assignedToUserId always passes through untouched — assigning by ID
+ * needs no extra scope. Resolving assignedToNameHint to an ID requires
+ * listing users (GET /users/), which this deployment's GHL Private
+ * Integration Token does NOT currently have scope for (confirmed live:
+ * 401 "not authorized for this scope") — that produces a specific,
+ * actionable error naming exactly what's missing, never a guessed ID.
+ */
+export async function resolveLeadAssignment(ghl: GhlClient, payload: Record<string, unknown>): Promise<Resolved> {
+  const { assignedToNameHint, ...rest } = payload;
+  if (typeof rest.assignedToUserId === "string" && rest.assignedToUserId) {
+    return { payload: rest };
+  }
+
+  if (typeof assignedToNameHint !== "string" || !assignedToNameHint) {
+    return { payload: rest, error: "No assignedToUserId was given and there is no user/team name to look it up by." };
+  }
+
+  let users;
+  try {
+    users = await ghl.listUsers();
+  } catch (error) {
+    if (error instanceof GhlApiError && error.status === 401) {
+      return {
+        payload: rest,
+        error: `Cannot look up "${assignedToNameHint}" by name — this GoHighLevel Private Integration Token doesn't have the "Users" scope. Either grant it (Settings -> Private Integrations -> enable Users read) or provide a real GoHighLevel user ID directly.`,
+      };
+    }
+    return { payload: rest, error: `Could not list GoHighLevel users: ${error instanceof Error ? error.message : "unknown error"}` };
+  }
+
+  const nameLower = assignedToNameHint.toLowerCase();
+  const matches = users.filter((u) => u.name.toLowerCase().includes(nameLower));
+  if (matches.length === 0) {
+    const available = users.map((u) => u.name).join(", ") || "none";
+    return { payload: rest, error: `No GoHighLevel user found matching "${assignedToNameHint}". Available users: ${available}.` };
+  }
+  if (matches.length > 1) {
+    return { payload: rest, error: `Multiple GoHighLevel users match "${assignedToNameHint}": ${matches.map((u) => u.name).join(", ")}. Please be more specific.` };
+  }
+
+  return { payload: { ...rest, assignedToUserId: matches[0]!.id } };
 }

@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import { ALLOWED_ACTIONS, MUTATION_TIER } from "../lib/actions/allowlist";
 import { buildGhlRequest } from "../lib/actions/registry";
 import { MockN8nClient, attachGhlRequest } from "../lib/n8n/client";
-import { resolveOpportunityId, resolvePipelineMutation, resolvePipelineStage } from "../lib/orchestration/resolvers";
+import { resolveLeadAssignment, resolveOpportunityId, resolvePipelineMutation, resolvePipelineStage } from "../lib/orchestration/resolvers";
+import { GhlApiError } from "../lib/ghl/types";
 import type { GhlClient, GhlOpportunity, GhlPipeline } from "../lib/ghl/types";
 
 function notUsed(): never {
@@ -27,6 +28,8 @@ function fakeGhlClient(overrides: Partial<GhlClient>): GhlClient {
     deleteContact: notUsed,
     addContactTag: notUsed,
     removeContactTag: notUsed,
+    assignLead: notUsed,
+    listUsers: notUsed,
     getOpportunity: notUsed,
     searchOpportunities: notUsed,
     createOpportunity: notUsed,
@@ -272,4 +275,29 @@ test("resolvePipelineMutation errors clearly when no stage matches (never guesse
   const ghl = fakeGhlClient({ getPipeline: async () => SOLAR_PIPELINE_FULL });
   const result = await resolvePipelineMutation(ghl, "DELETE_PIPELINE_STAGE", { pipelineId: "pipe-solar", stageNameHint: "Nonexistent Stage" });
   assert.match(result.error ?? "", /No stage found matching/);
+});
+
+test("resolveLeadAssignment passes a real assignedToUserId through untouched (no scope needed)", async () => {
+  const ghl = fakeGhlClient({ listUsers: notUsed });
+  const result = await resolveLeadAssignment(ghl, { contactId: "c1", assignedToUserId: "real-user-42" });
+  assert.equal(result.error, undefined);
+  assert.equal(result.payload.assignedToUserId, "real-user-42");
+});
+
+test("resolveLeadAssignment resolves a real user by name when the Users scope is available", async () => {
+  const ghl = fakeGhlClient({ listUsers: async () => [{ id: "user-sales", name: "Sales Team" }, { id: "user-demo", name: "Demo Team" }] });
+  const result = await resolveLeadAssignment(ghl, { contactId: "c1", assignedToNameHint: "Sales Team" });
+  assert.equal(result.error, undefined);
+  assert.equal(result.payload.assignedToUserId, "user-sales");
+});
+
+test("resolveLeadAssignment gives a specific, actionable error when the Users scope is missing (never guesses an ID)", async () => {
+  const ghl = fakeGhlClient({
+    listUsers: async () => {
+      throw new GhlApiError("The token is not authorized for this scope.", 401);
+    },
+  });
+  const result = await resolveLeadAssignment(ghl, { contactId: "c1", assignedToNameHint: "Sales Team" });
+  assert.match(result.error ?? "", /Users.*scope/i);
+  assert.match(result.error ?? "", /Sales Team/);
 });

@@ -44,6 +44,7 @@ export const WORKFLOW_BY_ACTION: Record<AllowedAction, string> = {
   DELETE_CONTACT: "ghl-contact-workflow",
   ADD_CONTACT_TAG: "ghl-contact-workflow",
   REMOVE_CONTACT_TAG: "ghl-contact-workflow",
+  ASSIGN_LEAD: "ghl-contact-workflow",
   LIST_CUSTOM_FIELDS: "ghl-contact-workflow",
   CREATE_CUSTOM_FIELD: "ghl-contact-workflow",
   UPDATE_CUSTOM_FIELD: "ghl-contact-workflow",

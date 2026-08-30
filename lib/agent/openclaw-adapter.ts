@@ -20,6 +20,7 @@ const ACTION_DESCRIPTIONS: Record<AllowedAction, string> = {
   DELETE_CONTACT: `Permanently delete a GoHighLevel contact. Destructive — only propose this when the user explicitly asks to delete/remove a contact.${CONTACT_ID_NOTE}`,
   ADD_CONTACT_TAG: `Add one or more tags to a contact (e.g. "add the hot-lead tag to Rahul").${CONTACT_ID_NOTE}`,
   REMOVE_CONTACT_TAG: `Remove one or more tags from a contact.${CONTACT_ID_NOTE}`,
+  ASSIGN_LEAD: `Assign a contact to a GoHighLevel user/team member. Set assignedToNameHint to the person/team's name if you don't know their real assignedToUserId (this may fail if the account's integration token lacks permission to look up users by name — report that clearly rather than guessing an ID).${CONTACT_ID_NOTE}`,
 
   SEARCH_OPPORTUNITIES: "Search/list GoHighLevel opportunities, optionally filtered to one contact's opportunities.",
   GET_OPPORTUNITY: "Look up a single GoHighLevel opportunity's details by its real opportunityId.",
@@ -50,7 +51,7 @@ const ACTION_DESCRIPTIONS: Record<AllowedAction, string> = {
 
   SEARCH_CONVERSATIONS: `Search a contact's conversation threads.${CONTACT_ID_NOTE}`,
   GET_CONVERSATION: "Look up a single conversation by its real conversationId.",
-  SEND_MESSAGE: `Send a real SMS or email message to a contact. High-impact — only propose this when the user explicitly asks to send/message someone, and always double-check the message text.${CONTACT_ID_NOTE}`,
+  SEND_MESSAGE: `Send a real SMS or email message to a contact. High-impact — only propose this when the user explicitly asks to send/message someone, and always double-check the message text. For type Email, also set a subject.${CONTACT_ID_NOTE}`,
 
   LIST_CALENDARS: "List the calendars configured for this GoHighLevel location.",
 };
@@ -75,6 +76,8 @@ function buildToolSchema() {
         stageName: { type: "string", description: "For CREATE_PIPELINE_STAGE: the new stage's name." },
         newStageName: { type: "string", description: "For UPDATE_PIPELINE_STAGE: the stage's new name." },
         stageId: { type: "string", description: "The real GoHighLevel pipeline stage ID, only if already known." },
+        assignedToUserId: { type: "string", description: "The real GoHighLevel user ID to assign a lead to, only if already known." },
+        assignedToNameHint: { type: "string", description: "The user/team's name, when assignedToUserId isn't already known." },
         firstName: { type: "string" },
         lastName: { type: "string" },
         name: { type: "string", description: "A contact's display name, or (for CREATE_PIPELINE/UPDATE_PIPELINE) the pipeline's name." },
@@ -94,8 +97,9 @@ function buildToolSchema() {
         dataType: { type: "string", description: "e.g. TEXT, LARGE_TEXT, NUMERICAL, DATE." },
         model: { type: "string", enum: ["contact", "opportunity"] },
         conversationId: { type: "string" },
-        message: { type: "string" },
+        message: { type: "string", description: "The message body. For SEND_MESSAGE with type Email, plain text is fine — it's wrapped as the email body." },
         type: { type: "string", enum: ["SMS", "Email"] },
+        subject: { type: "string", description: "For SEND_MESSAGE with type Email: the email subject line." },
       },
       additionalProperties: true,
     },

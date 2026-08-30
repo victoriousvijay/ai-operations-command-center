@@ -70,6 +70,8 @@ export function buildGhlRequest(
       return { method: "POST", path: `/contacts/${p.contactId}/tags`, body: { tags: p.tags } };
     case "REMOVE_CONTACT_TAG":
       return { method: "DELETE", path: `/contacts/${p.contactId}/tags`, body: { tags: p.tags } };
+    case "ASSIGN_LEAD":
+      return { method: "PUT", path: `/contacts/${p.contactId}`, body: { assignedTo: p.assignedToUserId } };
 
     case "SEARCH_OPPORTUNITIES": {
       const params = new URLSearchParams({ location_id: locationId(), limit: "20" });
@@ -140,8 +142,17 @@ export function buildGhlRequest(
     }
     case "GET_CONVERSATION":
       return { method: "GET", path: `/conversations/${p.conversationId}` };
-    case "SEND_MESSAGE":
-      return { method: "POST", path: "/conversations/messages", body: { type: p.type ?? "SMS", contactId: p.contactId, message: p.message } };
+    case "SEND_MESSAGE": {
+      // GHL's real contract differs by type (confirmed live): SMS takes
+      // `message`; Email requires `html` + `subject`, not `message` —
+      // sending `message` for Email returns 422 CONVERSATIONS_MSG_NO_CONTENT.
+      const type = (p.type as string | undefined) ?? "SMS";
+      const body =
+        type === "Email"
+          ? { type, contactId: p.contactId, subject: p.subject ?? "Message from your automation system", html: `<p>${p.message}</p>` }
+          : { type, contactId: p.contactId, message: p.message };
+      return { method: "POST", path: "/conversations/messages", body };
+    }
 
     case "LIST_CALENDARS":
       return { method: "GET", path: `/calendars/?locationId=${locationId()}` };

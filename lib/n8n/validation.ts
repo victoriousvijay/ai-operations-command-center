@@ -52,6 +52,12 @@ export const payloadSchemas = {
     contactLookupHint: z.string().optional(),
     tags: z.array(z.string().min(1)).min(1),
   }),
+  ASSIGN_LEAD: z.object({
+    contactId: z.string().min(1),
+    contactLookupHint: z.string().optional(),
+    assignedToUserId: z.string().min(1),
+    assignedToNameHint: z.string().optional(),
+  }),
 
   SEARCH_OPPORTUNITIES: z.object({ contactId: z.string().optional(), query: z.string().optional() }),
   GET_OPPORTUNITY: z.object({ opportunityId: z.string().min(1) }),
@@ -171,6 +177,7 @@ export const payloadSchemas = {
     contactLookupHint: z.string().optional(),
     message: z.string().min(1),
     type: z.enum(["SMS", "Email"]).optional(),
+    subject: z.string().optional(),
   }),
 
   LIST_CALENDARS: z.object({}),

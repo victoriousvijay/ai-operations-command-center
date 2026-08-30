@@ -16,6 +16,13 @@ export interface GhlContact {
   phone?: string;
   tags?: string[];
   companyName?: string;
+  assignedTo?: string;
+}
+
+export interface GhlUser {
+  id: string;
+  name: string;
+  email?: string;
 }
 
 export interface GhlOpportunity {
@@ -97,6 +104,12 @@ export interface UpdateContactInput {
   phone?: string;
   tags?: string[];
   customFields?: Array<{ key: string; field_value: string }>;
+}
+
+export interface AssignLeadInput {
+  contactId: string;
+  /** Real GoHighLevel user ID. Resolved from assignedToNameHint upstream if needed. */
+  assignedToUserId: string;
 }
 
 export interface UpsertContactInput {
@@ -202,10 +215,20 @@ export interface UpdateCustomFieldInput {
 }
 
 // ── Conversations ───────────────────────────────────────────────────────
+/**
+ * GoHighLevel's real POST /conversations/messages contract differs by
+ * type (confirmed live): SMS takes the body in `message`; Email requires
+ * `html` (not `message`) plus `subject` — sending `message` for an Email
+ * type returns 422 CONVERSATIONS_MSG_NO_CONTENT even though the same
+ * field works fine for SMS. `message` here is the human-readable body
+ * either way; the client maps it to the right GHL field per `type`.
+ */
 export interface SendMessageInput {
   contactId: string;
   message: string;
   type?: "SMS" | "Email";
+  /** Required by GHL for type "Email"; ignored for SMS. */
+  subject?: string;
 }
 
 /**
@@ -222,6 +245,9 @@ export interface GhlClient {
   deleteContact(contactId: string): Promise<{ success: true }>;
   addContactTag(input: ContactTagInput): Promise<{ tags: string[] }>;
   removeContactTag(input: ContactTagInput): Promise<{ tags: string[] }>;
+  assignLead(input: AssignLeadInput): Promise<GhlContact>;
+  /** Requires the "Users" scope on this location's Private Integration Token. */
+  listUsers(): Promise<GhlUser[]>;
 
   // Opportunities
   getOpportunity(opportunityId: string): Promise<GhlOpportunity>;

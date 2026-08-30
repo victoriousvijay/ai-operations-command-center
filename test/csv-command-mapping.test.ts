@@ -57,7 +57,6 @@ test("RUN_WORKFLOW and other unimplemented commands are rejected as UNSUPPORTED,
   const csv = [
     "command,name,email,stage",
     "RUN_WORKFLOW,Vijay Sharma,vijay@example.com,Sales Team",
-    "ASSIGN_LEAD,Rahul Mehta,rahul@example.com,Demo Team",
     "CREATE_WEBHOOK,Priya Singh,priya@example.com,",
     "TRIGGER_WEBHOOK,Ananya Gupta,ananya@example.com,",
   ].join("\n");
@@ -68,6 +67,16 @@ test("RUN_WORKFLOW and other unimplemented commands are rejected as UNSUPPORTED,
     assert.equal(action.status, "error");
     assert.match(action.message ?? "", /UNSUPPORTED/);
   }
+});
+
+test("ASSIGN_LEAD parses into a real action carrying a name hint, not UNSUPPORTED", () => {
+  const csv = ["command,name,email,stage", "ASSIGN_LEAD,Rahul Mehta,rahul@example.com,Demo Team"].join("\n");
+  const result = parseCsvFile("test.csv", csv);
+  const action = result.actions[0]!;
+  assert.equal(action.type, "ASSIGN_LEAD");
+  assert.equal(action.status, "ready");
+  assert.equal(action.payload.assignedToNameHint, "Demo Team");
+  assert.equal(action.payload.contactLookupHint, "Rahul Mehta");
 });
 
 test("a completely unrecognized command is rejected rather than defaulted to UPSERT_CONTACT", () => {
@@ -111,7 +120,5 @@ test("the actual uploaded premura_execution_commands.csv produces multiple disti
   assert.ok(typeCounts.has("CREATE_OPPORTUNITY"), "CREATE_OPPORTUNITY rows must be classified as CREATE_OPPORTUNITY");
   assert.ok(typeCounts.has("UPDATE_OPPORTUNITY"), "UPDATE_OPPORTUNITY (incl. CHANGE_STATUS) rows must be classified as UPDATE_OPPORTUNITY");
   assert.ok(typeCounts.has("SEND_MESSAGE"), "SEND_EMAIL/SEND_SMS rows must be classified as SEND_MESSAGE");
-  // ASSIGN_LEAD has no real backing API — must be rejected, not silently run.
-  const assignLeadRows = result.actions.filter((a) => a.message?.includes("ASSIGN_LEAD"));
-  assert.ok(assignLeadRows.every((a) => a.type === null && a.status === "error"), "ASSIGN_LEAD rows must be UNSUPPORTED, not executed as anything");
+  assert.ok(typeCounts.has("ASSIGN_LEAD"), "ASSIGN_LEAD rows must be classified as ASSIGN_LEAD, not rejected or misrun");
 });

@@ -129,6 +129,7 @@ their opportunity, and add a tag" becomes three actions).
 | "Delete the contact Rahul Sharma" *(asks for confirmation first)* | `DELETE_CONTACT` |
 | "Add the hot-lead tag to Rahul" | `ADD_CONTACT_TAG` |
 | "Remove the cold tag from Rahul" | `REMOVE_CONTACT_TAG` |
+| "Assign Rahul to the Sales Team" *(needs GHL Users scope to resolve a team/user by name — provide a real user ID instead if that scope isn't granted)* | `ASSIGN_LEAD` |
 | "Show today's new opportunities" / "Find opportunities for Rahul" | `SEARCH_OPPORTUNITIES` |
 | "Create an opportunity for Rahul worth 50000 in Solar Leads" | `CREATE_OPPORTUNITY` |
 | "Move Rahul's opportunity to Qualified" / "Update Greg's opportunity to Won" | `UPDATE_OPPORTUNITY` |
@@ -173,6 +174,7 @@ exactly how each endpoint below was verified live before being wired in.
 | `CREATE_CONTACT`, `UPDATE_CONTACT`, `UPSERT_CONTACT` | mutating | ✅ live-verified |
 | `DELETE_CONTACT` | **destructive — needs confirm** | ✅ live-verified |
 | `ADD_CONTACT_TAG`, `REMOVE_CONTACT_TAG` | mutating | ✅ live-verified |
+| `ASSIGN_LEAD` | mutating | ⚠️ **partially verified** — assigning by a real, already-known GoHighLevel user ID reaches the real API (confirmed live: a fake-but-real-shaped ID returns GHL's own 404, proving the request lands correctly); resolving a user by *name* is blocked because this PIT lacks the "Users" scope — see [GHL scopes](#ghl-scopes) |
 | `SEARCH_OPPORTUNITIES`, `GET_OPPORTUNITY` | read-only | ✅ live-verified |
 | `CREATE_OPPORTUNITY`, `UPDATE_OPPORTUNITY` | mutating | ✅ live-verified |
 | `DELETE_OPPORTUNITY` | **destructive — needs confirm** | ✅ live-verified |
@@ -206,6 +208,7 @@ implemented**:
 | Notes (write) | add notes to a contact | `ADD_NOTE` |
 | Custom Fields (read/write) | list/create/update/delete custom fields | all `*_CUSTOM_FIELD` actions |
 | Conversations (read, message write) | search conversations, send messages | `SEARCH_CONVERSATIONS`, `GET_CONVERSATION`, `SEND_MESSAGE` |
+| Users (**not granted**) | resolve a user/team name (e.g. "Sales Team") to a real user ID for `ASSIGN_LEAD` | `ASSIGN_LEAD` by name — assigning by a known user ID works without this scope |
 | Calendars (read) | list calendars | `LIST_CALENDARS` |
 
 Pipeline write access was granted after initial development and

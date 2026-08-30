@@ -31,6 +31,8 @@ function fakeGhlClient(contacts: GhlContact[]): GhlClient {
     deleteContact: notUsed,
     addContactTag: notUsed,
     removeContactTag: notUsed,
+    assignLead: notUsed,
+    listUsers: notUsed,
     getOpportunity: notUsed,
     searchOpportunities: notUsed,
     createOpportunity: notUsed,

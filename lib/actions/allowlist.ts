@@ -40,6 +40,7 @@ export const ALLOWED_ACTIONS = [
   "DELETE_CONTACT",
   "ADD_CONTACT_TAG",
   "REMOVE_CONTACT_TAG",
+  "ASSIGN_LEAD",
   // Opportunities
   "SEARCH_OPPORTUNITIES",
   "GET_OPPORTUNITY",
@@ -101,6 +102,7 @@ export const MUTATION_TIER: Record<AllowedAction, "readonly" | "mutating" | "des
   DELETE_CONTACT: "destructive",
   ADD_CONTACT_TAG: "mutating",
   REMOVE_CONTACT_TAG: "mutating",
+  ASSIGN_LEAD: "mutating",
 
   SEARCH_OPPORTUNITIES: "readonly",
   GET_OPPORTUNITY: "readonly",

@@ -98,6 +98,7 @@ const COMMAND_ALIASES: Record<string, string> = {
   CHANGE_STATUS: "UPDATE_OPPORTUNITY",
   SEND_EMAIL: "SEND_MESSAGE_EMAIL",
   SEND_SMS: "SEND_MESSAGE_SMS",
+  ASSIGN_LEAD: "ASSIGN_LEAD",
 };
 
 /**
@@ -106,7 +107,6 @@ const COMMAND_ALIASES: Record<string, string> = {
  * specific error rather than silently run as something else or dropped.
  */
 const UNSUPPORTED_COMMANDS: Record<string, string> = {
-  ASSIGN_LEAD: "Assigning a lead to a user/team has no verified GoHighLevel API in this build's action registry yet.",
   CREATE_WEBHOOK: "Webhook management is an n8n/automation-platform concept, not a GoHighLevel CRM action — out of scope for this registry.",
   TRIGGER_WEBHOOK: "Webhook management is an n8n/automation-platform concept, not a GoHighLevel CRM action — out of scope for this registry.",
   RUN_WORKFLOW: "Running an arbitrary workflow is exactly the kind of uncontrolled action this system's allowlist exists to prevent — not implemented.",
@@ -147,6 +147,7 @@ function rowToAction(headers: string[], values: string[], rowNumber: number): Pl
   const taskDueDate = get("taskduedate", "duedate");
   const note = get("note", "notes");
   const messageBody = get("task", "message", "body");
+  const subject = get("subject", "emailsubject");
 
   const target = name ?? [firstName, lastName].filter(Boolean).join(" ") ?? email ?? rawPhone ?? `row ${rowNumber}`;
   const lookupHint = name ?? ([firstName, lastName].filter(Boolean).join(" ") || email);
@@ -251,6 +252,21 @@ function rowToAction(headers: string[], values: string[], rowNumber: number): Pl
     return withPhoneWarning({ source: rowNumber, type: resolved, payload: { contactLookupHint: lookupHint, tags }, status: "ready", target });
   }
 
+  if (resolved === "ASSIGN_LEAD") {
+    const assignee = get("assignedto", "assignee", "team", "user") ?? stage;
+    if (!lookupHint || !assignee) {
+      return { source: rowNumber, type: null, payload: {}, status: "error", target, message: "ASSIGN_LEAD row needs a Name/Email and a user/team to assign to." };
+    }
+    return withPhoneWarning({
+      source: rowNumber,
+      type: "ASSIGN_LEAD",
+      payload: { contactLookupHint: lookupHint, assignedToNameHint: assignee },
+      status: "ready",
+      target,
+      message: `Assign ${target} to "${assignee}" (looked up by name at execution time — requires the GoHighLevel "Users" scope on this token).`,
+    });
+  }
+
   if (resolved === "ADD_NOTE") {
     if (!lookupHint || !note) {
       return { source: rowNumber, type: null, payload: {}, status: "error", target, message: "ADD_NOTE row needs a Name/Email and a Note value." };
@@ -265,7 +281,12 @@ function rowToAction(headers: string[], values: string[], rowNumber: number): Pl
     return withPhoneWarning({
       source: rowNumber,
       type: "SEND_MESSAGE",
-      payload: { contactLookupHint: lookupHint, message: messageBody, type: resolved === "SEND_MESSAGE_EMAIL" ? "Email" : "SMS" },
+      payload: {
+        contactLookupHint: lookupHint,
+        message: messageBody,
+        type: resolved === "SEND_MESSAGE_EMAIL" ? "Email" : "SMS",
+        ...(resolved === "SEND_MESSAGE_EMAIL" && subject ? { subject } : {}),
+      },
       status: "ready",
       target,
       message: `Sends a real ${resolved === "SEND_MESSAGE_EMAIL" ? "email" : "SMS"} to ${target} — requires confirmation before it runs.`,

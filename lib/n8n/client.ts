@@ -136,6 +136,9 @@ export class MockN8nClient implements N8nClient {
         case "REMOVE_CONTACT_TAG":
           response = await ghl.removeContactTag(payload as { contactId: string; tags: string[] });
           break;
+        case "ASSIGN_LEAD":
+          response = { contact: await ghl.assignLead(payload as { contactId: string; assignedToUserId: string }) };
+          break;
 
         case "SEARCH_OPPORTUNITIES":
           response = { opportunities: await ghl.searchOpportunities(payload) };

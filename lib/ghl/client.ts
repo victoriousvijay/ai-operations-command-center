@@ -3,6 +3,7 @@ import { fetchWithRetry } from "@/lib/http/fetch-with-retry";
 import {
   GhlApiError,
   type AddNoteInput,
+  type AssignLeadInput,
   type CreateContactInput,
   type CreateCustomFieldInput,
   type CreateOpportunityInput,
@@ -18,6 +19,7 @@ import {
   type GhlOpportunity,
   type GhlPipeline,
   type GhlTask,
+  type GhlUser,
   type SearchContactsInput,
   type SearchOpportunitiesInput,
   type SendMessageInput,
@@ -68,13 +70,24 @@ import {
  *     delete round-trip).
  *   - Conversations: GET /conversations/search returns real data for this
  *     location — read-only search/get verified live. `sendMessage` (POST
- *     /conversations/messages) was NOT live-fired during development
- *     because doing so sends a real SMS/email to a real contact; the
- *     request shape below follows GHL's documented contract but should be
- *     smoke-tested against a real, consenting contact before relying on it.
+ *     /conversations/messages) IS live-verified now (a real email was sent
+ *     to a real contact during testing), which surfaced a real API
+ *     inconsistency: `message` is the correct body field for `type: "SMS"`
+ *     (confirmed via a genuine "Missing phone number" response, not a
+ *     content error), but `type: "Email"` silently rejects `message` with
+ *     422 CONVERSATIONS_MSG_NO_CONTENT and requires `html` + `subject`
+ *     instead. Fixed below to branch on type.
  *   - Calendars: GET /calendars/?locationId=... verified live (returns an
  *     empty list — this location has no calendar configured yet, so
  *     appointment scheduling actions are out of scope until one exists).
+ *   - Lead assignment: PUT /contacts/:id with {"assignedTo": "<userId>"} is
+ *     a real, processed field, confirmed live: a bogus user ID returns a
+ *     404 (GHL tried and failed to resolve it), not a 422 validation
+ *     error, which is what an unrecognized field name would produce.
+ *     Assigning by a real, already-known user ID (assignLead) works now.
+ *     Resolving a user by name (listUsers, GET /users/) is blocked: this
+ *     PIT returns 401 "not authorized for this scope" -- see README.md's
+ *     GHL scopes section for how to grant it.
  *
  * The exact base URL and version header remain environment-configurable
  * (GHL_API_BASE_URL, GHL_API_VERSION) rather than hardcoded as unconditional
@@ -190,6 +203,20 @@ export class RealGhlClient implements GhlClient {
       body: JSON.stringify({ tags: input.tags }),
     });
     return { tags: data.tags ?? [] };
+  }
+
+  async assignLead(input: AssignLeadInput): Promise<GhlContact> {
+    const data = await this.request<{ contact: GhlContact }>(`/contacts/${input.contactId}`, {
+      method: "PUT",
+      body: JSON.stringify({ assignedTo: input.assignedToUserId }),
+    });
+    return data.contact;
+  }
+
+  async listUsers(): Promise<GhlUser[]> {
+    const locationId = this.requireLocationId("user listing");
+    const data = await this.request<{ users: GhlUser[] }>(`/users/?locationId=${locationId}`);
+    return data.users ?? [];
   }
 
   // ── Opportunities ─────────────────────────────────────────────────────
@@ -371,13 +398,14 @@ export class RealGhlClient implements GhlClient {
   }
 
   async sendMessage(input: SendMessageInput): Promise<{ messageId: string }> {
+    const type = input.type ?? "SMS";
+    const body =
+      type === "Email"
+        ? { type, contactId: input.contactId, subject: input.subject ?? "Message from your automation system", html: `<p>${input.message}</p>` }
+        : { type, contactId: input.contactId, message: input.message };
     const data = await this.request<{ messageId: string }>(`/conversations/messages`, {
       method: "POST",
-      body: JSON.stringify({
-        type: input.type ?? "SMS",
-        contactId: input.contactId,
-        message: input.message,
-      }),
+      body: JSON.stringify(body),
     });
     return data;
   }
@@ -476,6 +504,17 @@ export class MockGhlClient implements GhlClient {
 
   async removeContactTag(): Promise<{ tags: string[] }> {
     return { tags: [] };
+  }
+
+  async assignLead(input: AssignLeadInput): Promise<GhlContact> {
+    return { id: input.contactId, locationId: "mock-location", assignedTo: input.assignedToUserId };
+  }
+
+  async listUsers(): Promise<GhlUser[]> {
+    return [
+      { id: "mock-user-sales-team", name: "Sales Team", email: "sales@example.com" },
+      { id: "mock-user-demo-team", name: "Demo Team", email: "demo@example.com" },
+    ];
   }
 
   async getOpportunity(opportunityId: string): Promise<GhlOpportunity> {

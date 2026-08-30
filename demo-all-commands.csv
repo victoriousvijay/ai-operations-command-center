@@ -1,0 +1,15 @@
+command,name,email,phone,company,tags,task,stage,pipeline,value,note
+CREATE_CONTACT,Vikram Nair,vikram.nair.demo@example.com,,Nair Textiles,,,,,,
+CREATE_CONTACT,Sneha Kulkarni,sneha.kulkarni.demo@example.com,,Kulkarni Designs,,,,,,
+UPDATE_CONTACT,Olivia Bennett,olivia.bennett@coastalhvacservices.com,,Coastal HVAC Services,,,,,,
+ADD_CONTACT_TAG,Olivia Bennett,olivia.bennett@coastalhvacservices.com,,,hot-lead,,,,,
+REMOVE_CONTACT_TAG,Olivia Bennett,olivia.bennett@coastalhvacservices.com,,,ai-cold,,,,,
+CREATE_TASK,Olivia Bennett,olivia.bennett@coastalhvacservices.com,,,,Call to confirm demo time,,,,
+ADD_NOTE,Olivia Bennett,olivia.bennett@coastalhvacservices.com,,,,,,,,Spoke on phone - very interested in AI automation package
+CREATE_OPPORTUNITY,Vikram Nair,vikram.nair.demo@example.com,,,,,New Lead,Solar Leads,60000,
+UPDATE_OPPORTUNITY,Olivia Bennett,olivia.bennett@coastalhvacservices.com,,,,,AI Qualified,,,
+CHANGE_STATUS,Sneha Kulkarni,sneha.kulkarni.demo@example.com,,,,,Contacted,,,
+SEND_EMAIL,Olivia Bennett,olivia.bennett@coastalhvacservices.com,,,,Following up on our conversation - let us know if you have questions.,,,,
+SEND_SMS,Vikram Nair,vikram.nair.demo@example.com,,,,"Hi Vikram, thanks for your interest! We'll call you shortly.",,,,
+ASSIGN_LEAD,Sneha Kulkarni,sneha.kulkarni.demo@example.com,,,,,,,,
+INVALID_ROW,Broken Contact,not-an-email,,,,,,,,

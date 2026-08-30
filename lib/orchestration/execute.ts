@@ -4,7 +4,7 @@ import { getAgentAdapter } from "@/lib/agent";
 import { getGhlClient } from "@/lib/ghl";
 import { getN8nClient } from "@/lib/n8n";
 import { attachGhlRequest } from "@/lib/n8n/client";
-import { resolveContactId, resolveOpportunityId, resolvePipelineMutation, resolvePipelineStage } from "./resolvers";
+import { resolveContactId, resolveLeadAssignment, resolveOpportunityId, resolvePipelineMutation, resolvePipelineStage } from "./resolvers";
 import {
   createAutomationAction,
   createAutomationRequest,
@@ -42,6 +42,7 @@ const NEEDS_CONTACT_RESOLUTION = new Set<AllowedAction>([
   "DELETE_CONTACT",
   "ADD_CONTACT_TAG",
   "REMOVE_CONTACT_TAG",
+  "ASSIGN_LEAD",
   "CREATE_OPPORTUNITY",
   "UPDATE_OPPORTUNITY",
   "DELETE_OPPORTUNITY",
@@ -71,6 +72,9 @@ const NEEDS_PIPELINE_MUTATION_RESOLUTION = new Set<AllowedAction>([
   "DELETE_PIPELINE_STAGE",
   "DELETE_PIPELINE",
 ]);
+
+// Actions that may carry an assignedToNameHint instead of a real GHL user ID.
+const NEEDS_LEAD_ASSIGNMENT_RESOLUTION = new Set<AllowedAction>(["ASSIGN_LEAD"]);
 
 /**
  * Resolves every name/email/pipeline-name hint on a payload to real
@@ -109,6 +113,12 @@ async function resolveReferences(
       actionType as "UPDATE_PIPELINE" | "CREATE_PIPELINE_STAGE" | "UPDATE_PIPELINE_STAGE" | "DELETE_PIPELINE_STAGE" | "DELETE_PIPELINE",
       current,
     );
+    if (resolved.error) return resolved;
+    current = resolved.payload;
+  }
+
+  if (NEEDS_LEAD_ASSIGNMENT_RESOLUTION.has(actionType)) {
+    const resolved = await resolveLeadAssignment(ghl, current);
     if (resolved.error) return resolved;
     current = resolved.payload;
   }
