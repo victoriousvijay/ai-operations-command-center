@@ -35,9 +35,18 @@ function overallStatus(results: ExecutedActionResult[]): RequestStatus {
  *   5. log every execution and update statuses
  *   6. return the structured result the API/dashboard render
  */
+const CONTACT_ACTION_TYPES = new Set(["GET_CONTACT", "UPDATE_CONTACT", "CREATE_TASK", "ADD_NOTE"]);
+
 export async function executeAutomationRequest(params: {
   userRequest: string;
   idempotencyKey?: string;
+  /**
+   * Manual test override: a real GoHighLevel contact ID to use instead of
+   * whatever the agent proposed (the mock agent can only synthesize a
+   * placeholder ID — see lib/agent/mock-adapter.ts). Applied to every
+   * contact-touching action in this request.
+   */
+  contactIdOverride?: string;
 }): Promise<ExecuteResult> {
   if (params.idempotencyKey) {
     const existing = await findAutomationRequestByIdempotencyKey(params.idempotencyKey);
@@ -120,19 +129,38 @@ export async function executeAutomationRequest(params: {
       continue;
     }
 
+    const payload =
+      params.contactIdOverride && CONTACT_ACTION_TYPES.has(proposed.type)
+        ? { ...proposed.payload, contactId: params.contactIdOverride }
+        : proposed.payload;
+
     const action = await createAutomationAction({
       requestId: request.id,
       actionType: proposed.type,
-      payload: proposed.payload,
+      payload,
     });
     await updateAutomationAction(action.id, { status: "validated" });
 
-    const execution = await n8n.execute({
-      requestId: request.id,
-      actionId: action.id,
-      actionType: proposed.type,
-      payload: proposed.payload,
-    });
+    // Defense in depth: an N8nClient's contract is to always resolve with a
+    // structured result, never throw — but an adapter bug or an unexpected
+    // exception from a real HTTP/API call underneath it must not be allowed
+    // to leave this request stuck at "executing" forever.
+    let execution;
+    try {
+      execution = await n8n.execute({
+        requestId: request.id,
+        actionId: action.id,
+        actionType: proposed.type,
+        payload,
+      });
+    } catch (error) {
+      execution = {
+        ok: false as const,
+        workflowName: "n8n-adapter",
+        durationMs: 0,
+        error: error instanceof Error ? error.message : "Unknown, unhandled n8n adapter error.",
+      };
+    }
 
     await createExecutionLog({
       requestId: request.id,

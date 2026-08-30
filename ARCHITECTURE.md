@@ -1,9 +1,8 @@
 # Architecture — AI Operations Command Center
 
-Status: Supabase is live (project `wvifvkdwjxhxvzieloam`, all 4 migrations
-applied, verified with a real end-to-end run — see below). GoHighLevel is
-live (`GHL_ADAPTER=real`, authenticated with a real Private Integration
-token, confirmed against `services.leadconnectorhq.com`). n8n has 4
+Status: Supabase and GoHighLevel are both live and fully verified —
+including a real GHL contact search (by name) resolving to a real
+contact, and a real write (task creation) against that contact. n8n has 4
 workflows deployed to a real connected account, pending 3 credential
 attachments. OpenClaw remains on its mock adapter pending Gateway details
 — the real adapter is implemented and independently switchable. See
@@ -40,10 +39,51 @@ GoHighLevel API error 400 on /contacts/mock-contact-john-smith:
 → automation_requests.status = failed
 ```
 
-A full success-path run against real GHL data needs a real contact or
-opportunity ID from the connected account — the mock agent has no way to
-look one up, since real ID resolution is exactly what the real OpenClaw
-Gateway or n8n's own GHL lookups would provide.
+That "not found" was correct behavior, not a bug — but it read like a
+failure of the GHL integration rather than what it actually was (a fake
+placeholder ID with nothing to resolve it). `lib/n8n/client.ts`'s
+`resolveContactId` now closes that gap: it mirrors the "Find Contact" step
+the architecture's own n8n workflow design already called for, resolving
+a name/email hint against `GhlClient.searchContacts` before any
+contact-touching action runs, so a synthetic ID either resolves to a real
+one or fails with a specific, actionable message
+(`GHL_LOCATION_ID is not configured` / `No GoHighLevel contact found
+matching "..."`) instead of a generic "not found." A real contact ID
+supplied directly — via the dashboard's manual override field or
+`contactIdOverride` on `POST /api/execute` — skips resolution and is used
+as-is, for testing a full success path without `GHL_LOCATION_ID`.
+
+Building this surfaced a real reliability bug, fixed the same session: the
+first version called `resolveContactId` outside `MockN8nClient.execute`'s
+try/catch, so a thrown `GhlApiError` (missing `GHL_LOCATION_ID`) escaped
+uncaught and left a request stuck at `status: executing` indefinitely
+instead of resolving to `failed`. Fixed by moving the call inside the try
+block, and by adding a second layer of defense in
+
+### Full real success path, both read and write
+
+With `GHL_LOCATION_ID` set, submitting "Get contact for Amanda Torres"
+through the dashboard: the mock agent synthesized a placeholder ID and a
+`contactLookupHint`, `resolveContactId` searched the real GHL location and
+found a real matching contact (a lead already in that GHL sub-account),
+substituted the real ID, and `RealGhlClient.getContact` returned real data
+— `automation_requests.status = success` in 1120ms. A follow-up "Create a
+follow-up task for Amanda Torres for tomorrow" resolved the same real
+contact and created a **real task** in that GHL account via
+`RealGhlClient.createTask` — `success` in 3182ms. Both confirmed in the
+dashboard's Execution Logs panel and via direct SQL query. This is the
+full THINK → resolve → DO path working against live data, not just
+mocked or read-only.
+
+One more real-world correction along the way: GHL's `/contacts/search`
+endpoint rejects an unrecognized `limit` field — the real parameter name
+is `pageLimit` (`RealGhlClient.searchContacts` initially guessed `limit`
+by convention; the live API's `422` response corrected it immediately).
+`lib/orchestration/execute.ts`'s dispatch loop: `n8n.execute()` is now
+wrapped in its own try/catch too, so no `N8nClient` implementation — mock,
+HTTP, or a future one — can leave a request stuck no matter what it
+throws. The one row this left stranded mid-fix was manually reconciled to
+`failed` in Supabase with a note explaining why.
 
 ## System diagram
 
@@ -240,6 +280,11 @@ branch on action type (If node) → call the matching verified GHL endpoint
   exception or a bare stack trace.
 - **Full audit trail**: every action and every execution attempt is a row
   in Supabase, independent of whether the overall request succeeded.
+- **No adapter can wedge a request**: `n8n.execute()` is called inside a
+  try/catch in `lib/orchestration/execute.ts`'s dispatch loop, on top of
+  every `N8nClient` implementation already being expected to never throw.
+  This is a real bug found and fixed in this project, not a hypothetical —
+  see "Verified end-to-end run" above.
 
 ## Repository structure
 
@@ -252,18 +297,19 @@ app/
   api/agents/, agents/[id]/      GET+POST / PATCH
   api/integrations/, integrations/[id]/  GET+POST / PATCH
   api/contacts/                  GET+POST
+  api/ghl/contacts/search/        GET — direct access to real contact search
 lib/
   actions/allowlist.ts           the allowlist (source of truth)
   agent/                         AgentAdapter (openclaw-adapter.ts, mock-adapter.ts)
-  n8n/                           N8nClient (client.ts, validation.ts, types.ts)
-  ghl/                           GhlClient (client.ts, types.ts)
+  n8n/                           N8nClient (client.ts incl. resolveContactId, validation.ts, types.ts)
+  ghl/                           GhlClient (client.ts incl. searchContacts, types.ts)
   http/fetch-with-retry.ts       shared timeout + retry wrapper
-  orchestration/execute.ts       THINK -> allowlist -> DO pipeline
+  orchestration/execute.ts       THINK -> allowlist -> DO pipeline, contact ID override
   supabase/                      server.ts, browser.ts, types.ts, queries/
   types/domain.ts                shared application types
-supabase/migrations/             SQL schema, three files, filename-ordered
+supabase/migrations/             SQL schema, four files, filename-ordered
 n8n/workflows/                   importable n8n workflow JSON + setup guide
-test/                            node:test suite for the mock pipeline
+test/                            node:test suite for the mock pipeline + resolveContactId
 ```
 
 ## Security decisions

@@ -5,6 +5,9 @@ import { executeAutomationRequest } from "@/lib/orchestration/execute";
 const executeRequestSchema = z.object({
   userRequest: z.string().trim().min(1, "userRequest is required").max(2000),
   idempotencyKey: z.string().trim().min(1).max(200).optional(),
+  // Manual test override: a real GHL contact ID, used instead of whatever
+  // the agent proposed. See lib/orchestration/execute.ts.
+  contactIdOverride: z.string().trim().min(1).max(200).optional(),
 });
 
 export async function POST(request: Request) {
@@ -36,6 +39,7 @@ export async function POST(request: Request) {
     const result = await executeAutomationRequest({
       userRequest: parsed.data.userRequest,
       idempotencyKey: parsed.data.idempotencyKey,
+      contactIdOverride: parsed.data.contactIdOverride,
     });
 
     return NextResponse.json({ ok: true, ...result }, { status: 200 });

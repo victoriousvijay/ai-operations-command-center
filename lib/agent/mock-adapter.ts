@@ -2,6 +2,13 @@ import "server-only";
 import type { AgentProposal, ProposedAction } from "@/lib/types/domain";
 import type { AgentAdapter } from "./types";
 
+/**
+ * Marks a contactId as synthesized rather than looked up. lib/n8n/client.ts
+ * checks for this prefix to decide whether a real GHL contact lookup
+ * (by contactLookupHint) should run before dispatching an action.
+ */
+export const SYNTHETIC_CONTACT_PREFIX = "mock-contact-";
+
 function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -67,11 +74,15 @@ export class MockAgentAdapter implements AgentAdapter {
       });
     }
 
+    const email = userRequest.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0];
+    const lookupHint = name ?? email;
+
     if (/\btask\b|\bfollow[\s-]?up\b/i.test(userRequest)) {
       actions.push({
         type: "CREATE_TASK",
         payload: {
-          contactId: `mock-contact-${slug}`,
+          contactId: `${SYNTHETIC_CONTACT_PREFIX}${slug}`,
+          ...(lookupHint ? { contactLookupHint: lookupHint } : {}),
           title: name ? `Follow up with ${name}` : "Follow-up task",
           dueDate: /tomorrow/i.test(userRequest) ? tomorrowIso() : tomorrowIso(),
         },
@@ -83,13 +94,13 @@ export class MockAgentAdapter implements AgentAdapter {
       actions.push({
         type: "ADD_NOTE",
         payload: {
-          contactId: `mock-contact-${slug}`,
+          contactId: `${SYNTHETIC_CONTACT_PREFIX}${slug}`,
+          ...(lookupHint ? { contactLookupHint: lookupHint } : {}),
           body: noteMatch[1].trim(),
         },
       });
     }
 
-    const email = userRequest.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0];
     const phone = userRequest.match(/\+?\d[\d\s().-]{7,}\d/)?.[0];
     if (
       (email || phone) &&
@@ -99,7 +110,8 @@ export class MockAgentAdapter implements AgentAdapter {
       actions.push({
         type: "UPDATE_CONTACT",
         payload: {
-          contactId: `mock-contact-${slug}`,
+          contactId: `${SYNTHETIC_CONTACT_PREFIX}${slug}`,
+          ...(lookupHint ? { contactLookupHint: lookupHint } : {}),
           ...(email ? { email } : {}),
           ...(phone ? { phone } : {}),
         },
@@ -115,7 +127,10 @@ export class MockAgentAdapter implements AgentAdapter {
       } else {
         actions.push({
           type: "GET_CONTACT",
-          payload: { contactId: `mock-contact-${slug}` },
+          payload: {
+            contactId: `${SYNTHETIC_CONTACT_PREFIX}${slug}`,
+            ...(lookupHint ? { contactLookupHint: lookupHint } : {}),
+          },
         });
       }
     }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Agent, AutomationAction, AutomationRequest, Integration } from "@/lib/types/domain";
+import type { Agent, AutomationAction, AutomationRequest, ExecutionLog, Integration } from "@/lib/types/domain";
 import { StatsRow } from "./StatsRow";
 import { StatusBadge } from "./StatusBadge";
 
@@ -31,33 +31,39 @@ export function Dashboard() {
   const [requests, setRequests] = useState<RequestWithActions[] | null>(null);
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [integrations, setIntegrations] = useState<Integration[] | null>(null);
+  const [logs, setLogs] = useState<ExecutionLog[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [userRequest, setUserRequest] = useState("");
+  const [contactIdOverride, setContactIdOverride] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<ExecuteResponse | null>(null);
 
   const loadDashboardData = useCallback(async () => {
     try {
-      const [requestsRes, agentsRes, integrationsRes] = await Promise.all([
+      const [requestsRes, agentsRes, integrationsRes, logsRes] = await Promise.all([
         fetch("/api/requests"),
         fetch("/api/agents"),
         fetch("/api/integrations"),
+        fetch("/api/execution-logs"),
       ]);
-      const [requestsJson, agentsJson, integrationsJson] = await Promise.all([
+      const [requestsJson, agentsJson, integrationsJson, logsJson] = await Promise.all([
         requestsRes.json(),
         agentsRes.json(),
         integrationsRes.json(),
+        logsRes.json(),
       ]);
 
       if (!requestsJson.ok) throw new Error(requestsJson.error?.message ?? "Failed to load requests.");
       if (!agentsJson.ok) throw new Error(agentsJson.error?.message ?? "Failed to load agents.");
       if (!integrationsJson.ok)
         throw new Error(integrationsJson.error?.message ?? "Failed to load integrations.");
+      if (!logsJson.ok) throw new Error(logsJson.error?.message ?? "Failed to load execution logs.");
 
       setRequests(requestsJson.requests);
       setAgents(agentsJson.agents);
       setIntegrations(integrationsJson.integrations);
+      setLogs(logsJson.logs);
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Failed to load dashboard data.");
@@ -77,7 +83,10 @@ export function Dashboard() {
       const response = await fetch("/api/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userRequest }),
+        body: JSON.stringify({
+          userRequest,
+          ...(contactIdOverride.trim() ? { contactIdOverride: contactIdOverride.trim() } : {}),
+        }),
       });
       const json = (await response.json()) as ExecuteResponse;
       setLastResult(json);
@@ -130,6 +139,12 @@ export function Dashboard() {
           rows={3}
           placeholder="What would you like me to do?"
           className="mt-3 w-full resize-none rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
+        />
+        <input
+          value={contactIdOverride}
+          onChange={(e) => setContactIdOverride(e.target.value)}
+          placeholder="Real GHL contact ID (optional — overrides the agent's guess so this hits real data)"
+          className="mt-2 w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-xs text-neutral-300 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
         />
         <div className="mt-3 flex items-center justify-between">
           <button
@@ -273,6 +288,53 @@ export function Dashboard() {
           </section>
         </div>
       </div>
+
+      <section className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-5">
+        <h2 className="text-sm font-medium text-neutral-200">Execution logs</h2>
+        <p className="mt-1 text-xs text-neutral-500">
+          Raw audit trail — one row per workflow execution attempt, written by the n8n adapter (real or mock).
+        </p>
+
+        {logs === null && !loadError && <p className="mt-3 text-sm text-neutral-500">Loading…</p>}
+        {logs === null && loadError && (
+          <p className="mt-3 text-sm text-neutral-600">Unavailable — see error above.</p>
+        )}
+        {logs !== null && logs.length === 0 && (
+          <p className="mt-3 text-sm text-neutral-500">No executions logged yet.</p>
+        )}
+        {logs !== null && logs.length > 0 && (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-neutral-500">
+                  <th className="pb-2 pr-4 font-normal">Time</th>
+                  <th className="pb-2 pr-4 font-normal">Workflow</th>
+                  <th className="pb-2 pr-4 font-normal">Status</th>
+                  <th className="pb-2 pr-4 font-normal">Duration</th>
+                  <th className="pb-2 font-normal">Error</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-800">
+                {logs.map((log) => (
+                  <tr key={log.id} className="text-neutral-300">
+                    <td className="py-2 pr-4 whitespace-nowrap text-neutral-500">
+                      {formatTimestamp(log.createdAt)}
+                    </td>
+                    <td className="py-2 pr-4 font-mono">{log.workflowName}</td>
+                    <td className="py-2 pr-4">
+                      <StatusBadge status={log.status} />
+                    </td>
+                    <td className="py-2 pr-4 text-neutral-500">
+                      {log.durationMs !== null ? `${log.durationMs}ms` : "—"}
+                    </td>
+                    <td className="py-2 text-red-400">{log.errorMessage ?? ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

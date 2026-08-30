@@ -76,6 +76,11 @@ export interface AddNoteInput {
   userId?: string;
 }
 
+export interface SearchContactsInput {
+  /** Free-text search — matches GHL's contact search across name/email/phone. */
+  query: string;
+}
+
 /**
  * Adapter boundary between our application and GoHighLevel. Implementations
  * must never log or return the raw access token.
@@ -83,6 +88,7 @@ export interface AddNoteInput {
 export interface GhlClient {
   getContact(contactId: string): Promise<GhlContact>;
   updateContact(input: UpdateContactInput): Promise<GhlContact>;
+  searchContacts(input: SearchContactsInput): Promise<GhlContact[]>;
   getOpportunity(opportunityId: string): Promise<GhlOpportunity>;
   updateOpportunity(input: UpdateOpportunityInput): Promise<GhlOpportunity>;
   createTask(input: CreateTaskInput): Promise<GhlTask>;

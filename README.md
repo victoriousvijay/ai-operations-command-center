@@ -12,19 +12,20 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full system design.
 
 **Live and verified end to end.** Supabase is a real, connected project
 (schema applied, RLS enabled, zero advisory warnings beyond an intentional
-deny-by-default policy gap) — not a placeholder. The full pipeline —
-command input → agent reasoning → allowlist validation → n8n dispatch →
-GoHighLevel → Supabase audit log → dashboard — was run for real against
-it: submitting the architecture spec's example request produced a
-`success` row in `automation_requests` with two `success` rows in
-`automation_actions`/`execution_logs`, confirmed both in the dashboard and
-with a direct SQL query. The n8n and GoHighLevel legs of that run used
-their mock adapters (clearly labeled); real n8n workflows are deployed
-live to a connected n8n Cloud account pending 3 credential attachments —
-see [`n8n/workflows/README.md`](./n8n/workflows/README.md). Real OpenClaw
-and GoHighLevel adapters are fully implemented and verified against their
-real interfaces, switching on with one environment variable each — see
-[What's mocked vs. connected](#whats-mocked-vs-actually-connected).
+deny-by-default policy gap) — not a placeholder. GoHighLevel is also real
+and fully verified end to end, both reading and writing: the agent's
+extracted contact name resolves through a real GHL contact search to a
+real contact, then a real task is created against it (a 1120ms real
+lookup, a 3182ms real write). The full pipeline — command input → agent
+reasoning → allowlist validation → n8n dispatch → GoHighLevel → Supabase
+audit log → dashboard — has been run for real against both, confirmed in
+the dashboard and by direct SQL/API checks. Real n8n workflows are
+deployed live to a connected n8n Cloud account, pending 3 credential
+attachments on the n8n side — see
+[`n8n/workflows/README.md`](./n8n/workflows/README.md). OpenClaw remains
+mocked pending Gateway details; its real adapter is implemented and
+verified against OpenClaw's docs, switching on with one environment
+variable — see [What's mocked vs. connected](#whats-mocked-vs-actually-connected).
 
 ## What it does
 
@@ -40,11 +41,18 @@ and the system:
    plan of allowed actions (`UPDATE_OPPORTUNITY`, `CREATE_TASK`).
 3. Re-validates every proposed action against a server-side allowlist,
    independent of whatever the agent already filtered.
-4. Dispatches each validated action to the n8n execution layer, which
-   validates the payload again and calls the GoHighLevel API.
-5. Logs every execution (`execution_logs`) and updates each action's and
+4. For contact-touching actions, resolves the contact name/email the
+   agent extracted into a real GoHighLevel contact ID via a live search —
+   the agent only ever sees a name, never a real ID, so this step (mirroring
+   the "Find Contact" stage in the architecture's own n8n workflow design)
+   is what turns that into something GoHighLevel can act on. A real
+   contact ID can also be supplied directly (dashboard override field, or
+   `contactIdOverride` on the API) to skip resolution entirely.
+5. Dispatches each validated, resolved action to the n8n execution layer,
+   which validates the payload again and calls the GoHighLevel API.
+6. Logs every execution (`execution_logs`) and updates each action's and
    the request's status in Supabase.
-6. Returns a structured result the dashboard renders live.
+7. Returns a structured result the dashboard renders live.
 
 ## Architecture
 
@@ -158,6 +166,7 @@ explanations, including how each one was verified. Summary:
 | `GHL_ADAPTER` | backend | `mock` (default) or `real` |
 | `GHL_PRIVATE_INTEGRATION_TOKEN` | backend only | real GoHighLevel calls (`GHL_ADAPTER=real`) |
 | `GHL_API_BASE_URL`, `GHL_API_VERSION` | backend only | pre-filled with verified values; override only if GoHighLevel changes them |
+| `GHL_LOCATION_ID` | backend only | real contact search by name/email; direct-ID actions work without it |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | public (bundled to the browser) | reserved for a future client-side read path; unused today — RLS grants `anon` zero access |
 | `SUPABASE_SERVICE_ROLE_KEY` | backend only | all persistence; bypasses RLS, never exposed to the client |
 
@@ -209,15 +218,22 @@ instance: see [`n8n/workflows/README.md`](./n8n/workflows/README.md) for
 the four workflows to import, the two credentials to create, and exactly
 which env vars flip `N8N_ADAPTER` to `http`.
 
-### GoHighLevel
+### GoHighLevel — done, real Private Integration Token connected
 
-Not required for local/demo use (`GHL_ADAPTER=mock` returns deterministic
-fake responses). To connect a real sub-account: create a Private
+`GHL_ADAPTER=real` is active with a working token, verified live against
+`services.leadconnectorhq.com`. Direct-ID actions (given a real
+contact/opportunity ID) work now. For the mock agent's synthesized IDs to
+resolve to real contacts, also set `GHL_LOCATION_ID` (see `.env.example`
+for where to find it) — or skip that and use the dashboard's manual
+"Real GHL contact ID" override field to test against real data directly.
+See [`lib/ghl/README.md`](./lib/ghl/README.md) for how the whole API
+contract (base URL, headers, endpoint paths, and the contact-search
+endpoint) was verified against the live API, including one assumption
+that verification corrected (see "What was verified, and how").
+
+To point this app at a different GHL sub-account instead: create a Private
 Integration token scoped to one location, set
-`GHL_PRIVATE_INTEGRATION_TOKEN` and `GHL_ADAPTER=real`. See
-[`lib/ghl/README.md`](./lib/ghl/README.md) for how the API contract
-(base URL, required headers, endpoint paths) was verified against the live
-API before this adapter was written.
+`GHL_PRIVATE_INTEGRATION_TOKEN` and `GHL_ADAPTER=real`.
 
 ### OpenClaw
 
@@ -239,13 +255,17 @@ npm run build       # production build
 npm test            # node:test suite for the mock agent/n8n/GHL pipeline
 ```
 
-`npm test` exercises real application code (not reimplemented fixtures):
-it runs the architecture's canonical example request through
+`npm test` (9 tests) exercises real application code (not reimplemented
+fixtures): it runs the architecture's canonical example request through
 `MockAgentAdapter` and `MockN8nClient` (which itself calls `MockGhlClient`)
-and asserts on the resulting actions, plus a payload-validation rejection
-case. It does not require Supabase — everything Supabase-dependent
-(`app/api/*`, `lib/orchestration/execute.ts`) is verified via `typecheck`,
-`lint`, `build`, and manual testing against a real Supabase project (see
+and asserts on the resulting actions; a payload-validation rejection case;
+and five cases for `resolveContactId` (the real-contact-search resolution
+step) against a fake `GhlClient`, covering both `GHL_ADAPTER` modes, a
+successful resolution, a no-match error, and a no-hint error. It does not
+require Supabase or live GHL credentials — everything requiring those
+(`app/api/*`, `lib/orchestration/execute.ts`, `RealGhlClient` itself) is
+verified via `typecheck`, `lint`, `build`, and manual testing against the
+real, connected Supabase project and GoHighLevel sub-account (see
 [What's mocked vs. actually connected](#whats-mocked-vs-actually-connected)).
 
 ## What's mocked vs. actually connected
@@ -319,3 +339,16 @@ is configured; runtime requests will fail clearly until it is.
   token credential is missing/expired.
 - **GHL calls fail with a version-related error** — GoHighLevel may have
   revised the `Version` header value; update `GHL_API_VERSION`.
+- **"GHL_LOCATION_ID is not configured — contact search requires it"** —
+  with `GHL_ADAPTER=real`, a contact-touching action whose ID the agent
+  synthesized (e.g. `mock-contact-john-smith`) tried to resolve a real
+  contact by name/email and couldn't, because `GHL_LOCATION_ID` isn't set.
+  Set it, or use the dashboard's manual "Real GHL contact ID" override to
+  bypass lookup entirely for that request. This is intentionally a
+  specific, actionable error — never a bare "contact not found," which
+  would wrongly read as a real data problem instead of a config gap.
+- **"No GoHighLevel contact found matching \"...\""** — `GHL_LOCATION_ID`
+  is set and the search ran for real, but no contact in that location
+  matched the name/email the agent extracted from the request text. Use
+  the manual override with a real contact ID, or rephrase the request with
+  a name/email that exists in that GHL location.

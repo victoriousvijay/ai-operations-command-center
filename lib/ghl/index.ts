@@ -33,6 +33,7 @@ export function getGhlClient(): GhlClient {
     baseUrl: process.env.GHL_API_BASE_URL ?? "https://services.leadconnectorhq.com",
     version: process.env.GHL_API_VERSION ?? "2021-07-28",
     token,
+    locationId: process.env.GHL_LOCATION_ID ?? null,
   });
   return cached;
 }

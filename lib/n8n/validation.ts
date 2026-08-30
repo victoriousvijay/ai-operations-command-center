@@ -8,9 +8,10 @@ import type { AllowedAction } from "@/lib/actions/allowlist";
  * input" is genuinely exercised in the local/demo path, not skipped.
  */
 export const payloadSchemas = {
-  GET_CONTACT: z.object({ contactId: z.string().min(1) }),
+  GET_CONTACT: z.object({ contactId: z.string().min(1), contactLookupHint: z.string().optional() }),
   UPDATE_CONTACT: z.object({
     contactId: z.string().min(1),
+    contactLookupHint: z.string().optional(),
     firstName: z.string().optional(),
     lastName: z.string().optional(),
     email: z.string().email().optional(),
@@ -27,12 +28,14 @@ export const payloadSchemas = {
   }),
   CREATE_TASK: z.object({
     contactId: z.string().min(1),
+    contactLookupHint: z.string().optional(),
     title: z.string().min(1),
     dueDate: z.string().min(1),
     body: z.string().optional(),
   }),
   ADD_NOTE: z.object({
     contactId: z.string().min(1),
+    contactLookupHint: z.string().optional(),
     body: z.string().min(1),
   }),
 } as const satisfies Record<AllowedAction, z.ZodTypeAny>;

@@ -9,6 +9,7 @@ import {
   type GhlNote,
   type GhlOpportunity,
   type GhlTask,
+  type SearchContactsInput,
   type UpdateContactInput,
   type UpdateOpportunityInput,
 } from "./types";
@@ -24,11 +25,24 @@ import {
  *   - The API requires a `Version` header; omitting it returns
  *     {"message":"version header was not found."}. Confirmed working value:
  *     2021-07-28 (matches GoHighLevel's documented v2 API version scheme).
- *   - Auth is `Authorization: Bearer <token>`; an invalid token returns
- *     {"message":"Invalid JWT"}, confirming GHL tokens are JWTs.
+ *   - Auth is `Authorization: Bearer <token>`. A garbage token returns
+ *     {"message":"Invalid JWT"} — which reads like GHL tokens are JWTs, but
+ *     a real Private Integration Token (`pit-<uuid>`, not JWT-shaped)
+ *     authenticates fine past that same error. "Invalid JWT" is just GHL's
+ *     generic malformed-credential message, not proof of token format —
+ *     an earlier plausible-but-wrong inference, corrected once a real
+ *     token was available to test against.
  *   - Endpoint paths (GET/PUT /contacts/:id, PUT /opportunities/:id,
  *     POST /contacts/:id/tasks, POST /contacts/:id/notes) come from GHL's
  *     public API documentation and are internally consistent across it.
+ *   - `POST /contacts/search` is a real endpoint too, confirmed live: an
+ *     unscoped call returns {"message":"The token does not have access to
+ *     this location."} rather than a 404 — a location-permission error,
+ *     not a routing error, which only happens for a route that exists.
+ *     It requires `locationId`, which this Private Integration Token's
+ *     scope doesn't expose through any introspection endpoint (locations
+ *     and users search both return 401 "not authorized for this scope"),
+ *     so it's read from GHL_LOCATION_ID rather than guessed.
  *
  * The exact base URL and version header remain environment-configurable
  * (GHL_API_BASE_URL, GHL_API_VERSION) rather than hardcoded as unconditional
@@ -38,11 +52,13 @@ export class RealGhlClient implements GhlClient {
   private readonly baseUrl: string;
   private readonly version: string;
   private readonly token: string;
+  private readonly locationId: string | null;
 
-  constructor(config: { baseUrl: string; version: string; token: string }) {
+  constructor(config: { baseUrl: string; version: string; token: string; locationId?: string | null }) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
     this.version = config.version;
     this.token = config.token;
+    this.locationId = config.locationId ?? null;
   }
 
   private async request<T>(
@@ -85,6 +101,20 @@ export class RealGhlClient implements GhlClient {
       body: JSON.stringify(body),
     });
     return data.contact;
+  }
+
+  async searchContacts(input: SearchContactsInput): Promise<GhlContact[]> {
+    if (!this.locationId) {
+      throw new GhlApiError(
+        "GHL_LOCATION_ID is not configured — contact search requires it (direct-ID operations do not).",
+        400,
+      );
+    }
+    const data = await this.request<{ contacts?: GhlContact[] }>(`/contacts/search`, {
+      method: "POST",
+      body: JSON.stringify({ locationId: this.locationId, query: input.query, pageLimit: 5 }),
+    });
+    return data.contacts ?? [];
   }
 
   async getOpportunity(opportunityId: string): Promise<GhlOpportunity> {
@@ -148,6 +178,17 @@ export class MockGhlClient implements GhlClient {
       phone: input.phone,
       tags: input.tags,
     };
+  }
+
+  async searchContacts(input: SearchContactsInput): Promise<GhlContact[]> {
+    return [
+      {
+        id: `mock-contact-${input.query.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+        locationId: "mock-location",
+        name: input.query,
+        email: `${input.query.toLowerCase().replace(/[^a-z0-9]+/g, ".")}@example.com`,
+      },
+    ];
   }
 
   async getOpportunity(opportunityId: string): Promise<GhlOpportunity> {

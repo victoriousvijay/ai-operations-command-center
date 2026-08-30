@@ -13,8 +13,33 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MockAgentAdapter } from "../lib/agent/mock-adapter";
-import { MockN8nClient } from "../lib/n8n/client";
+import { MockAgentAdapter, SYNTHETIC_CONTACT_PREFIX } from "../lib/agent/mock-adapter";
+import { MockN8nClient, resolveContactId } from "../lib/n8n/client";
+import type { GhlClient, GhlContact } from "../lib/ghl/types";
+
+function fakeGhlClient(contacts: GhlContact[]): GhlClient {
+  return {
+    getContact: () => {
+      throw new Error("not used in this test");
+    },
+    updateContact: () => {
+      throw new Error("not used in this test");
+    },
+    searchContacts: async () => contacts,
+    getOpportunity: () => {
+      throw new Error("not used in this test");
+    },
+    updateOpportunity: () => {
+      throw new Error("not used in this test");
+    },
+    createTask: () => {
+      throw new Error("not used in this test");
+    },
+    addNote: () => {
+      throw new Error("not used in this test");
+    },
+  };
+}
 
 test("mock agent proposes UPDATE_OPPORTUNITY + CREATE_TASK for the architecture spec's example request", async () => {
   const agent = new MockAgentAdapter();
@@ -69,4 +94,80 @@ test("mock n8n rejects a payload that fails validation before calling GHL", asyn
 
   assert.equal(result.ok, false);
   assert.match(result.error ?? "", /Validation failed/);
+});
+
+test("resolveContactId leaves a real-looking contactId untouched even with GHL_ADAPTER=real", async () => {
+  const previous = process.env.GHL_ADAPTER;
+  process.env.GHL_ADAPTER = "real";
+  try {
+    const ghl = fakeGhlClient([]);
+    const result = await resolveContactId(ghl, { contactId: "real-ghl-id-abc123", contactLookupHint: "ignored" });
+    assert.equal(result.error, undefined);
+    assert.equal(result.payload.contactId, "real-ghl-id-abc123");
+  } finally {
+    process.env.GHL_ADAPTER = previous;
+  }
+});
+
+test("resolveContactId passes a synthetic contactId through unchanged when GHL_ADAPTER is not real", async () => {
+  const previous = process.env.GHL_ADAPTER;
+  delete process.env.GHL_ADAPTER;
+  try {
+    const ghl = fakeGhlClient([]);
+    const result = await resolveContactId(ghl, {
+      contactId: `${SYNTHETIC_CONTACT_PREFIX}john-smith`,
+      contactLookupHint: "John Smith",
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.payload.contactId, `${SYNTHETIC_CONTACT_PREFIX}john-smith`);
+  } finally {
+    process.env.GHL_ADAPTER = previous;
+  }
+});
+
+test("resolveContactId resolves a synthetic contactId to a real match when GHL_ADAPTER=real", async () => {
+  const previous = process.env.GHL_ADAPTER;
+  process.env.GHL_ADAPTER = "real";
+  try {
+    const ghl = fakeGhlClient([
+      { id: "real-contact-42", locationId: "loc_1", name: "John Smith", email: "john@example.com" },
+    ]);
+    const result = await resolveContactId(ghl, {
+      contactId: `${SYNTHETIC_CONTACT_PREFIX}john-smith`,
+      contactLookupHint: "John Smith",
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.payload.contactId, "real-contact-42");
+    assert.equal("contactLookupHint" in result.payload, false, "hint should be stripped before calling GHL");
+  } finally {
+    process.env.GHL_ADAPTER = previous;
+  }
+});
+
+test("resolveContactId returns a clear error (not a generic not-found) when no real match exists", async () => {
+  const previous = process.env.GHL_ADAPTER;
+  process.env.GHL_ADAPTER = "real";
+  try {
+    const ghl = fakeGhlClient([]);
+    const result = await resolveContactId(ghl, {
+      contactId: `${SYNTHETIC_CONTACT_PREFIX}nobody`,
+      contactLookupHint: "Nobody Real",
+    });
+    assert.match(result.error ?? "", /No GoHighLevel contact found matching "Nobody Real"/);
+    assert.match(result.error ?? "", /manual override/);
+  } finally {
+    process.env.GHL_ADAPTER = previous;
+  }
+});
+
+test("resolveContactId returns a clear error when there is no lookup hint to search with", async () => {
+  const previous = process.env.GHL_ADAPTER;
+  process.env.GHL_ADAPTER = "real";
+  try {
+    const ghl = fakeGhlClient([]);
+    const result = await resolveContactId(ghl, { contactId: `${SYNTHETIC_CONTACT_PREFIX}unknown` });
+    assert.match(result.error ?? "", /no lookup hint/);
+  } finally {
+    process.env.GHL_ADAPTER = previous;
+  }
 });
