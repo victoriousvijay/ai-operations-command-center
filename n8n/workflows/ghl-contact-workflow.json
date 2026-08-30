@@ -1,79 +1,51 @@
 {
   "name": "ghl-contact-workflow",
-  "active": false,
+  "active": true,
   "nodes": [
     {
+      "parameters": { "httpMethod": "POST", "path": "ghl-contact-workflow", "authentication": "headerAuth", "responseMode": "responseNode", "options": {} },
       "id": "ed8908a1-9599-4507-a60c-e5fca5ad6876",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [0, 96],
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "ghl-contact-workflow",
-        "authentication": "headerAuth",
-        "responseMode": "responseNode"
-      },
       "webhookId": "3f9b901a-a9b6-4d05-82bc-ec2a50f7b51b",
-      "credentials": {
-        "httpHeaderAuth": { "id": "REPLACE_WITH_CREDENTIAL_ID", "name": "n8n Webhook Shared Secret" }
-      }
+      "credentials": { "httpHeaderAuth": { "id": "RR5CFIxoUxa1z9MB", "name": "Header Auth account" } }
     },
     {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst body = item.body ?? item;\nconst requestId = body.requestId;\nconst actionId = body.actionId;\nconst actionType = body.actionType;\nconst payload = body.payload;\nconst ghlRequest = body.ghlRequest;\n\nif (!requestId || !actionId || !actionType || !payload || !ghlRequest) {\n  throw new Error(\"Missing requestId, actionId, actionType, payload, or ghlRequest.\");\n}\nif (!ghlRequest.method || !ghlRequest.path) {\n  throw new Error(\"ghlRequest.method and ghlRequest.path are required.\");\n}\n\nconst ALLOWED = [\"SEARCH_CONTACTS\",\"GET_CONTACT\",\"CREATE_CONTACT\",\"UPDATE_CONTACT\",\"UPSERT_CONTACT\",\"DELETE_CONTACT\",\"ADD_CONTACT_TAG\",\"REMOVE_CONTACT_TAG\",\"LIST_CUSTOM_FIELDS\",\"CREATE_CUSTOM_FIELD\",\"UPDATE_CUSTOM_FIELD\",\"DELETE_CUSTOM_FIELD\",\"SEARCH_CONVERSATIONS\",\"GET_CONVERSATION\",\"SEND_MESSAGE\",\"LIST_CALENDARS\"];\nif (!ALLOWED.includes(actionType)) {\n  throw new Error(\"ghl-contact-workflow does not handle action type \" + actionType);\n}\n\nreturn [{ json: { requestId: requestId, actionId: actionId, actionType: actionType, payload: payload, ghlRequest: ghlRequest } }];"
+      },
       "id": "5c17b215-e280-4b31-a294-8e8978ff4d6d",
       "name": "Validate Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [224, 96],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "const item = $input.first().json;\nconst body = item.body ?? item;\nconst requestId = body.requestId;\nconst actionId = body.actionId;\nconst actionType = body.actionType;\nconst payload = body.payload;\n\nif (!requestId || !actionId || !actionType || !payload) {\n  throw new Error(\"Missing requestId, actionId, actionType, or payload.\");\n}\nif (actionType !== \"GET_CONTACT\" && actionType !== \"UPDATE_CONTACT\") {\n  throw new Error(\"ghl-contact-workflow does not handle action type \" + actionType);\n}\nif (!payload.contactId) {\n  throw new Error(\"payload.contactId is required.\");\n}\n\nreturn [{ json: { requestId: requestId, actionId: actionId, actionType: actionType, payload: payload } }];"
-      }
+      "onError": "continueErrorOutput"
     },
     {
-      "id": "639948e8-e862-4b71-b8a9-2a504e1fa9e9",
-      "name": "Is GET_CONTACT?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.3,
-      "position": [448, 96],
       "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
-          "conditions": [
-            { "leftValue": "={{ $json.actionType }}", "rightValue": "GET_CONTACT", "operator": { "type": "string", "operation": "equals" } }
-          ],
-          "combinator": "and"
-        }
-      }
-    },
-    {
-      "id": "919ef171-1e4b-48fc-b69e-32c15f97d0df",
-      "name": "GET Contact (GHL)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.5,
-      "position": [672, 0],
-      "parameters": {
-        "method": "GET",
-        "url": "=https://services.leadconnectorhq.com/contacts/{{ $json.payload.contactId }}",
+        "method": "={{ $json.ghlRequest.method }}",
+        "url": "=https://services.leadconnectorhq.com{{ $json.ghlRequest.path }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
-        "headerParameters": { "parameters": [{ "name": "Version", "value": "2021-07-28" }] }
+        "headerParameters": { "parameters": [{ "name": "Version", "value": "2021-07-28" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.ghlRequest.body || {} }}",
+        "options": {}
       },
-      "credentials": {
-        "httpHeaderAuth": { "id": "REPLACE_WITH_CREDENTIAL_ID", "name": "GoHighLevel Bearer Token" }
-      }
+      "id": "3fa263e4-a425-45c2-a69f-c0b529450411",
+      "name": "GHL API Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [672, 192],
+      "onError": "continueErrorOutput",
+      "credentials": { "httpHeaderAuth": { "id": "X5xsf9XBJ4EeIETl", "name": "Header Auth account 2" } }
     },
     {
-      "id": "5085ca12-c16d-495e-aa65-e0f99488c113",
-      "name": "Log Execution",
-      "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1.3,
-      "position": [896, 96],
       "parameters": {
-        "mode": "once",
-        "source": "database",
         "workflowId": { "__rl": true, "mode": "id", "value": "l1AmbDI9rZG36jGx", "cachedResultName": "execution-logger-workflow" },
         "workflowInputs": {
           "mappingMode": "defineBelow",
@@ -87,61 +59,55 @@
           },
           "matchingColumns": [],
           "schema": [
-            { "id": "requestId", "displayName": "requestId", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
-            { "id": "actionId", "displayName": "actionId", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
-            { "id": "workflowName", "displayName": "workflowName", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
-            { "id": "status", "displayName": "status", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
-            { "id": "errorMessage", "displayName": "errorMessage", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "string" },
-            { "id": "durationMs", "displayName": "durationMs", "required": false, "defaultMatch": false, "display": true, "canBeUsedToMatch": true, "type": "number" }
+            { "id": "requestId", "displayName": "requestId", "type": "string" },
+            { "id": "actionId", "displayName": "actionId", "type": "string" },
+            { "id": "workflowName", "displayName": "workflowName", "type": "string" },
+            { "id": "status", "displayName": "status", "type": "string" },
+            { "id": "errorMessage", "displayName": "errorMessage", "type": "string" },
+            { "id": "durationMs", "displayName": "durationMs", "type": "number" }
           ],
           "attemptToConvertTypes": false,
           "convertFieldsToString": true
-        }
-      }
-    },
-    {
-      "id": "3fa263e4-a425-45c2-a69f-c0b529450411",
-      "name": "PUT Contact (GHL)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.5,
-      "position": [672, 192],
-      "parameters": {
-        "method": "PUT",
-        "url": "=https://services.leadconnectorhq.com/contacts/{{ $json.payload.contactId }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendHeaders": true,
-        "headerParameters": { "parameters": [{ "name": "Version", "value": "2021-07-28" }] },
-        "sendBody": true,
-        "contentType": "json",
-        "specifyBody": "json",
-        "jsonBody": "={{ { firstName: $json.payload.firstName, lastName: $json.payload.lastName, email: $json.payload.email, phone: $json.payload.phone, tags: $json.payload.tags } }}"
+        },
+        "options": {}
       },
-      "credentials": {
-        "httpHeaderAuth": { "id": "REPLACE_WITH_CREDENTIAL_ID", "name": "GoHighLevel Bearer Token" }
-      }
+      "id": "5085ca12-c16d-495e-aa65-e0f99488c113",
+      "name": "Log Execution",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [896, 96],
+      "onError": "continueRegularOutput"
     },
     {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $('GHL API Call').item.json.ok === false ? $('GHL API Call').item.json : { ok: true, response: $('GHL API Call').item.json } }}",
+        "options": { "responseCode": 200 }
+      },
       "id": "0294617e-6de4-45c6-a208-b86389664cde",
       "name": "Respond to Webhook",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
-      "position": [1120, 96],
-      "parameters": { "respondWith": "json", "responseBody": "={{ { ok: true, response: $json } }}" }
+      "position": [1120, 96]
+    },
+    {
+      "id": "9dac48f1-aa42-431c-9d1a-90a3ec9d37d1",
+      "name": "Format Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [896, 288],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const item = $input.first().json;\nconst err = item.error;\nconst message = (err && (err.message || err.description)) || (typeof err === 'string' ? err : 'GoHighLevel request failed.');\nconst httpCode = (err && err.httpCode) ? Number(err.httpCode) : 502;\nreturn [{ json: { ok: false, error: { message: message, httpCode: httpCode } } }];"
+      }
     }
   ],
   "connections": {
     "Webhook": { "main": [[{ "node": "Validate Input", "type": "main", "index": 0 }]] },
-    "Validate Input": { "main": [[{ "node": "Is GET_CONTACT?", "type": "main", "index": 0 }]] },
-    "Is GET_CONTACT?": {
-      "main": [
-        [{ "node": "GET Contact (GHL)", "type": "main", "index": 0 }],
-        [{ "node": "PUT Contact (GHL)", "type": "main", "index": 0 }]
-      ]
-    },
-    "GET Contact (GHL)": { "main": [[{ "node": "Log Execution", "type": "main", "index": 0 }]] },
-    "PUT Contact (GHL)": { "main": [[{ "node": "Log Execution", "type": "main", "index": 0 }]] },
-    "Log Execution": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
-  },
-  "settings": { "executionOrder": "v1" }
+    "Validate Input": { "main": [[{ "node": "GHL API Call", "type": "main", "index": 0 }], [{ "node": "Format Error Response", "type": "main", "index": 0 }]] },
+    "GHL API Call": { "main": [[{ "node": "Log Execution", "type": "main", "index": 0 }], [{ "node": "Format Error Response", "type": "main", "index": 0 }]] },
+    "Log Execution": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] },
+    "Format Error Response": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+  }
 }

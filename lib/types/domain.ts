@@ -8,6 +8,7 @@ import type { AllowedAction } from "@/lib/actions/allowlist";
 export type RequestStatus =
   | "received"
   | "interpreting"
+  | "awaiting_confirmation"
   | "executing"
   | "success"
   | "partial_failure"
@@ -110,6 +111,8 @@ export interface ExecutedActionResult {
   type: AllowedAction;
   status: ActionStatus;
   error?: string;
+  /** Present when status is "pending_approval" — what would run on confirm. */
+  payload?: Record<string, unknown>;
 }
 
 /** Structured response shape for POST /api/execute, matching the architecture spec. */
@@ -118,4 +121,6 @@ export interface ExecuteResult {
   status: RequestStatus;
   intent: string | null;
   actions: ExecutedActionResult[];
+  /** Present when status is "awaiting_confirmation" — pass this back as confirmRequestId with confirm:true to proceed. */
+  confirmRequestId?: string;
 }

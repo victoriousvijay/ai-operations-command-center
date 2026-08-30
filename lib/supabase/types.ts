@@ -27,6 +27,7 @@ export type IntegrationStatus = "active" | "disabled" | "error";
 export type AutomationRequestStatus =
   | "received"
   | "interpreting"
+  | "awaiting_confirmation"
   | "executing"
   | "success"
   | "partial_failure"

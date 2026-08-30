@@ -14,30 +14,43 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MockAgentAdapter, SYNTHETIC_CONTACT_PREFIX } from "../lib/agent/mock-adapter";
-import { MockN8nClient, resolveContactId } from "../lib/n8n/client";
+import { MockN8nClient, attachGhlRequest, resolveContactId } from "../lib/n8n/client";
 import type { GhlClient, GhlContact } from "../lib/ghl/types";
+
+function notUsed(): never {
+  throw new Error("not used in this test");
+}
 
 function fakeGhlClient(contacts: GhlContact[]): GhlClient {
   return {
-    getContact: () => {
-      throw new Error("not used in this test");
-    },
-    updateContact: () => {
-      throw new Error("not used in this test");
-    },
+    getContact: notUsed,
     searchContacts: async () => contacts,
-    getOpportunity: () => {
-      throw new Error("not used in this test");
-    },
-    updateOpportunity: () => {
-      throw new Error("not used in this test");
-    },
-    createTask: () => {
-      throw new Error("not used in this test");
-    },
-    addNote: () => {
-      throw new Error("not used in this test");
-    },
+    createContact: notUsed,
+    updateContact: notUsed,
+    upsertContact: notUsed,
+    deleteContact: notUsed,
+    addContactTag: notUsed,
+    removeContactTag: notUsed,
+    getOpportunity: notUsed,
+    searchOpportunities: notUsed,
+    createOpportunity: notUsed,
+    updateOpportunity: notUsed,
+    deleteOpportunity: notUsed,
+    listPipelines: notUsed,
+    listTasks: notUsed,
+    getTask: notUsed,
+    createTask: notUsed,
+    updateTask: notUsed,
+    deleteTask: notUsed,
+    addNote: notUsed,
+    listCustomFields: notUsed,
+    createCustomField: notUsed,
+    updateCustomField: notUsed,
+    deleteCustomField: notUsed,
+    searchConversations: notUsed,
+    getConversation: notUsed,
+    sendMessage: notUsed,
+    listCalendars: notUsed,
   };
 }
 
@@ -51,6 +64,20 @@ test("mock agent proposes UPDATE_OPPORTUNITY + CREATE_TASK for the architecture 
   assert.equal(proposal.actions.length, 2);
   assert.equal(proposal.actions[0]?.type, "UPDATE_OPPORTUNITY");
   assert.equal(proposal.actions[1]?.type, "CREATE_TASK");
+});
+
+test("mock agent extracts the contact name correctly when a command verb opens the sentence", async () => {
+  const agent = new MockAgentAdapter();
+  const proposal = await agent.propose("Move Greg Whitfield's opportunity to AI Qualified.");
+
+  assert.equal(proposal.intent, "CRM_UPDATE");
+  assert.equal(proposal.actions.length, 1);
+  assert.equal(proposal.actions[0]?.type, "UPDATE_OPPORTUNITY");
+  const payload = proposal.actions[0]?.payload as Record<string, unknown>;
+  assert.equal(payload.name, "AI Qualified");
+  assert.equal(payload.stageNameHint, "AI Qualified");
+  assert.equal(payload.pipelineStageId, "mock-stage-ai-qualified");
+  assert.equal(payload.opportunityId, "mock-opportunity-greg-whitfield");
 });
 
 test("mock agent returns UNKNOWN intent and no actions for an unrelated request", async () => {
@@ -70,12 +97,14 @@ test("mock n8n executes every proposed action against the mock GHL adapter", asy
   );
 
   for (const action of proposal.actions) {
-    const result = await n8n.execute({
-      requestId: "test-request",
-      actionId: "test-action",
-      actionType: action.type,
-      payload: action.payload,
-    });
+    const result = await n8n.execute(
+      attachGhlRequest({
+        requestId: "test-request",
+        actionId: "test-action",
+        actionType: action.type,
+        payload: action.payload,
+      }),
+    );
     assert.equal(result.ok, true, `expected ${action.type} to succeed, got error: ${result.error}`);
     assert.ok(result.response, `expected a response body for ${action.type}`);
   }
@@ -84,13 +113,15 @@ test("mock n8n executes every proposed action against the mock GHL adapter", asy
 test("mock n8n rejects a payload that fails validation before calling GHL", async () => {
   const n8n = new MockN8nClient();
 
-  const result = await n8n.execute({
-    requestId: "test-request",
-    actionId: "test-action",
-    actionType: "CREATE_TASK",
-    // Missing the required `title` and `dueDate` fields.
-    payload: { contactId: "mock-contact-jane-doe" },
-  });
+  const result = await n8n.execute(
+    attachGhlRequest({
+      requestId: "test-request",
+      actionId: "test-action",
+      actionType: "CREATE_TASK",
+      // Missing the required `title` and `dueDate` fields.
+      payload: { contactId: "mock-contact-jane-doe" },
+    }),
+  );
 
   assert.equal(result.ok, false);
   assert.match(result.error ?? "", /Validation failed/);

@@ -1,55 +1,20 @@
 import "server-only";
 import { fetchWithRetry } from "@/lib/http/fetch-with-retry";
+import { buildGhlRequest } from "@/lib/actions/registry";
 import { getGhlClient } from "@/lib/ghl";
-import type { GhlClient } from "@/lib/ghl";
-import { SYNTHETIC_CONTACT_PREFIX } from "@/lib/agent/mock-adapter";
 import { validatePayload } from "./validation";
 import { WORKFLOW_BY_ACTION, type N8nClient, type N8nExecuteRequest, type N8nExecuteResult } from "./types";
 
-/**
- * Mirrors the "Find Contact" step in the architecture's n8n workflow design
- * (Webhook -> Validate -> Find Contact -> Update Contact -> ...). The mock
- * agent has no way to resolve a real GHL contact, so it tags a payload with
- * `contactLookupHint` (a name or email) alongside a synthesized contactId;
- * this resolves that hint against the real GHL API before the action runs,
- * so a synthetic ID never gets silently passed off as a real one.
- */
-export async function resolveContactId(
-  ghl: GhlClient,
-  payload: Record<string, unknown>,
-): Promise<{ payload: Record<string, unknown>; error?: string }> {
-  const { contactLookupHint, ...rest } = payload;
-  const contactId = rest.contactId as string | undefined;
-
-  if (!contactId?.startsWith(SYNTHETIC_CONTACT_PREFIX) || process.env.GHL_ADAPTER !== "real") {
-    return { payload: rest };
-  }
-
-  if (typeof contactLookupHint !== "string" || !contactLookupHint) {
-    return {
-      payload: rest,
-      error: `No real contactId available and no lookup hint (name/email) to search GoHighLevel with. Provide a real contactId via the dashboard's manual override to test this action against real data.`,
-    };
-  }
-
-  const matches = await ghl.searchContacts({ query: contactLookupHint });
-  const bestMatch = matches[0];
-  if (!bestMatch) {
-    return {
-      payload: rest,
-      error: `No GoHighLevel contact found matching "${contactLookupHint}". Provide a real contactId via the dashboard's manual override to test this action against real data.`,
-    };
-  }
-
-  return { payload: { ...rest, contactId: bestMatch.id } };
-}
+export { resolveContactId } from "@/lib/orchestration/resolvers";
 
 /**
  * Real n8n adapter — POSTs to an authenticated n8n webhook per the
  * architecture's modular workflow design (one webhook per workflow,
  * mapped by action type in WORKFLOW_BY_ACTION). The shared secret is sent
  * as a header and is expected to be checked by each workflow's webhook
- * node (a Header Auth credential in n8n).
+ * node (a Header Auth credential in n8n). `ghlRequest` (built by
+ * lib/actions/registry.ts) tells the workflow's single generic HTTP node
+ * exactly what to execute — n8n itself never decides that.
  */
 export class HttpN8nClient implements N8nClient {
   constructor(
@@ -141,61 +106,103 @@ export class MockN8nClient implements N8nClient {
     }
 
     const ghl = getGhlClient();
-    let payload = validation.data;
+    const payload = validation.data;
 
     try {
-      if (
-        request.actionType === "GET_CONTACT" ||
-        request.actionType === "UPDATE_CONTACT" ||
-        request.actionType === "CREATE_TASK" ||
-        request.actionType === "ADD_NOTE"
-      ) {
-        const resolved = await resolveContactId(ghl, payload);
-        if (resolved.error) {
-          return { ok: false, workflowName, durationMs: Date.now() - startedAt, error: resolved.error };
-        }
-        payload = resolved.payload;
-      }
-
       let response: Record<string, unknown>;
 
       switch (request.actionType) {
-        case "GET_CONTACT": {
-          const contact = await ghl.getContact(payload.contactId as string);
-          response = { contact };
+        case "SEARCH_CONTACTS":
+          response = { contacts: await ghl.searchContacts(payload as { query: string }) };
           break;
-        }
-        case "UPDATE_CONTACT": {
-          const contact = await ghl.updateContact(
-            payload as { contactId: string } & Record<string, unknown>,
-          );
-          response = { contact };
+        case "GET_CONTACT":
+          response = { contact: await ghl.getContact(payload.contactId as string) };
           break;
-        }
-        case "GET_OPPORTUNITY": {
-          const opportunity = await ghl.getOpportunity(payload.opportunityId as string);
-          response = { opportunity };
+        case "CREATE_CONTACT":
+          response = { contact: await ghl.createContact(payload) };
           break;
-        }
-        case "UPDATE_OPPORTUNITY": {
-          const opportunity = await ghl.updateOpportunity(
-            payload as { opportunityId: string } & Record<string, unknown>,
-          );
-          response = { opportunity };
+        case "UPDATE_CONTACT":
+          response = { contact: await ghl.updateContact(payload as { contactId: string } & Record<string, unknown>) };
           break;
-        }
-        case "CREATE_TASK": {
-          const task = await ghl.createTask(
-            payload as { contactId: string; title: string; dueDate: string },
-          );
-          response = { task };
+        case "UPSERT_CONTACT":
+          response = await ghl.upsertContact(payload);
           break;
-        }
-        case "ADD_NOTE": {
-          const note = await ghl.addNote(payload as { contactId: string; body: string });
-          response = { note };
+        case "DELETE_CONTACT":
+          response = await ghl.deleteContact(payload.contactId as string);
           break;
-        }
+        case "ADD_CONTACT_TAG":
+          response = await ghl.addContactTag(payload as { contactId: string; tags: string[] });
+          break;
+        case "REMOVE_CONTACT_TAG":
+          response = await ghl.removeContactTag(payload as { contactId: string; tags: string[] });
+          break;
+
+        case "SEARCH_OPPORTUNITIES":
+          response = { opportunities: await ghl.searchOpportunities(payload) };
+          break;
+        case "GET_OPPORTUNITY":
+          response = { opportunity: await ghl.getOpportunity(payload.opportunityId as string) };
+          break;
+        case "CREATE_OPPORTUNITY":
+          response = { opportunity: await ghl.createOpportunity(payload as never) };
+          break;
+        case "UPDATE_OPPORTUNITY":
+          response = { opportunity: await ghl.updateOpportunity(payload as { opportunityId: string } & Record<string, unknown>) };
+          break;
+        case "DELETE_OPPORTUNITY":
+          response = await ghl.deleteOpportunity(payload.opportunityId as string);
+          break;
+
+        case "LIST_PIPELINES":
+          response = { pipelines: await ghl.listPipelines() };
+          break;
+
+        case "LIST_TASKS":
+          response = { tasks: await ghl.listTasks(payload.contactId as string) };
+          break;
+        case "GET_TASK":
+          response = { task: await ghl.getTask(payload.contactId as string, payload.taskId as string) };
+          break;
+        case "CREATE_TASK":
+          response = { task: await ghl.createTask(payload as { contactId: string; title: string; dueDate: string }) };
+          break;
+        case "UPDATE_TASK":
+          response = { task: await ghl.updateTask(payload as { contactId: string; taskId: string }) };
+          break;
+        case "DELETE_TASK":
+          response = await ghl.deleteTask(payload.contactId as string, payload.taskId as string);
+          break;
+
+        case "ADD_NOTE":
+          response = { note: await ghl.addNote(payload as { contactId: string; body: string }) };
+          break;
+
+        case "LIST_CUSTOM_FIELDS":
+          response = { customFields: await ghl.listCustomFields() };
+          break;
+        case "CREATE_CUSTOM_FIELD":
+          response = { customField: await ghl.createCustomField(payload as never) };
+          break;
+        case "UPDATE_CUSTOM_FIELD":
+          response = { customField: await ghl.updateCustomField(payload as { customFieldId: string }) };
+          break;
+        case "DELETE_CUSTOM_FIELD":
+          response = await ghl.deleteCustomField(payload.customFieldId as string);
+          break;
+
+        case "SEARCH_CONVERSATIONS":
+          response = { conversations: await ghl.searchConversations(payload.contactId as string | undefined) };
+          break;
+        case "GET_CONVERSATION":
+          response = { conversation: await ghl.getConversation(payload.conversationId as string) };
+          break;
+        case "SEND_MESSAGE":
+          response = await ghl.sendMessage(payload as { contactId: string; message: string });
+          break;
+
+        case "LIST_CALENDARS":
+          response = { calendars: await ghl.listCalendars() };
+          break;
       }
 
       return { ok: true, workflowName, durationMs: Date.now() - startedAt, response };
@@ -208,4 +215,9 @@ export class MockN8nClient implements N8nClient {
       };
     }
   }
+}
+
+/** Attaches the registry-built GHL request to an n8n dispatch payload. */
+export function attachGhlRequest(request: Omit<N8nExecuteRequest, "ghlRequest">): N8nExecuteRequest {
+  return { ...request, ghlRequest: buildGhlRequest(request.actionType, request.payload) };
 }

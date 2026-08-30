@@ -12,7 +12,26 @@ interface ExecuteResponse {
   requestId?: string;
   status?: string;
   intent?: string | null;
-  actions?: Array<{ type: string; status: string; error?: string }>;
+  actions?: Array<{ type: string; status: string; error?: string; payload?: Record<string, unknown> }>;
+  confirmRequestId?: string;
+  error?: { type: string; message: string };
+}
+
+interface PlannedActionView {
+  source: number;
+  type: string | null;
+  payload: Record<string, unknown>;
+  status: "ready" | "warning" | "error";
+  target: string;
+  message?: string;
+}
+
+interface FileParseResponse {
+  ok: boolean;
+  fileName?: string;
+  sourceType?: string;
+  actions?: PlannedActionView[];
+  warnings?: string[];
   error?: { type: string; message: string };
 }
 
@@ -38,6 +57,13 @@ export function Dashboard() {
   const [contactIdOverride, setContactIdOverride] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<ExecuteResponse | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [filePlan, setFilePlan] = useState<FileParseResponse | null>(null);
+  const [fileExecuting, setFileExecuting] = useState(false);
+  const [fileResult, setFileResult] = useState<ExecuteResponse | null>(null);
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -101,6 +127,88 @@ export function Dashboard() {
       });
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleConfirm(approve: boolean) {
+    if (!lastResult?.confirmRequestId || confirming) return;
+    if (!approve) {
+      setLastResult(null);
+      return;
+    }
+    setConfirming(true);
+    try {
+      const response = await fetch("/api/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmRequestId: lastResult.confirmRequestId, confirm: true }),
+      });
+      const json = (await response.json()) as ExecuteResponse;
+      setLastResult(json);
+      await loadDashboardData();
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  async function handleAnalyzeFile() {
+    if (!selectedFile || analyzing) return;
+    setAnalyzing(true);
+    setFilePlan(null);
+    setFileResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      const response = await fetch("/api/files/parse", { method: "POST", body: formData });
+      const json = (await response.json()) as FileParseResponse;
+      setFilePlan(json);
+    } catch (error) {
+      setFilePlan({ ok: false, error: { type: "network_error", message: error instanceof Error ? error.message : "Upload failed." } });
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function handleApproveFile() {
+    if (!filePlan?.actions || fileExecuting) return;
+    const runnable = filePlan.actions.filter((a) => a.status !== "error" && a.type);
+    if (runnable.length === 0) return;
+    setFileExecuting(true);
+    try {
+      const response = await fetch("/api/files/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          intent: `${filePlan.sourceType}:${filePlan.fileName}`,
+          actions: runnable.map((a) => ({ type: a.type, payload: a.payload })),
+        }),
+      });
+      const json = (await response.json()) as ExecuteResponse;
+      setFileResult(json);
+      await loadDashboardData();
+    } finally {
+      setFileExecuting(false);
+    }
+  }
+
+  async function handleConfirmFile(approve: boolean) {
+    if (!fileResult?.confirmRequestId) return;
+    if (!approve) {
+      setFileResult(null);
+      return;
+    }
+    setFileExecuting(true);
+    try {
+      const response = await fetch("/api/files/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmRequestId: fileResult.confirmRequestId, confirm: true }),
+      });
+      const json = (await response.json()) as ExecuteResponse;
+      setFileResult(json);
+      await loadDashboardData();
+    } finally {
+      setFileExecuting(false);
     }
   }
 
@@ -169,10 +277,17 @@ export function Dashboard() {
                 </div>
                 <ul className="flex flex-col gap-1">
                   {lastResult.actions?.map((action, i) => (
-                    <li key={i} className="flex items-center gap-2 text-neutral-300">
-                      <StatusBadge status={action.status} />
-                      <span>{action.type}</span>
-                      {action.error && <span className="text-xs text-red-400">— {action.error}</span>}
+                    <li key={i} className="flex flex-col gap-0.5 text-neutral-300">
+                      <div className="flex items-center gap-2">
+                        <StatusBadge status={action.status} />
+                        <span>{action.type}</span>
+                        {action.error && <span className="text-xs text-red-400">— {action.error}</span>}
+                      </div>
+                      {action.status === "pending_approval" && action.payload && (
+                        <pre className="ml-1 whitespace-pre-wrap rounded bg-neutral-900 px-2 py-1 text-[11px] text-neutral-500">
+                          {JSON.stringify(action.payload)}
+                        </pre>
+                      )}
                     </li>
                   ))}
                   {lastResult.actions?.length === 0 && (
@@ -181,10 +296,148 @@ export function Dashboard() {
                     </li>
                   )}
                 </ul>
+                {lastResult.status === "awaiting_confirmation" && (
+                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                    <span className="flex-1">
+                      This includes a destructive or high-impact action — confirm before it runs.
+                    </span>
+                    <button
+                      onClick={() => handleConfirm(false)}
+                      className="rounded border border-neutral-700 px-2 py-1 text-neutral-300 hover:bg-neutral-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleConfirm(true)}
+                      disabled={confirming}
+                      className="rounded bg-amber-500 px-2 py-1 font-medium text-neutral-900 hover:bg-amber-400 disabled:opacity-50"
+                    >
+                      {confirming ? "Running…" : "Approve & Execute"}
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-red-300">
                 {lastResult.error?.type}: {lastResult.error?.message}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-5">
+        <h2 className="text-sm font-medium text-neutral-200">Upload a file (CSV / PDF / Markdown)</h2>
+        <p className="mt-1 text-xs text-neutral-500">
+          CSV rows, PDF instructions, or Markdown steps are parsed into the same action plan a typed command
+          produces — nothing runs until you review it below and click Approve &amp; Execute.
+        </p>
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            type="file"
+            accept=".csv,.pdf,.md,.markdown,text/csv,application/pdf,text/markdown"
+            onChange={(e) => {
+              setSelectedFile(e.target.files?.[0] ?? null);
+              setFilePlan(null);
+              setFileResult(null);
+            }}
+            className="flex-1 text-xs text-neutral-400 file:mr-3 file:rounded-lg file:border file:border-neutral-700 file:bg-neutral-950 file:px-3 file:py-1.5 file:text-xs file:text-neutral-200"
+          />
+          <button
+            onClick={handleAnalyzeFile}
+            disabled={!selectedFile || analyzing}
+            className="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {analyzing ? "Analyzing…" : "Analyze"}
+          </button>
+        </div>
+
+        {filePlan && !filePlan.ok && (
+          <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {filePlan.error?.message}
+          </div>
+        )}
+
+        {filePlan?.ok && (
+          <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950 p-4 text-sm">
+            <div className="flex flex-wrap items-center gap-2 text-neutral-300">
+              <span className="font-mono text-xs text-neutral-500">{filePlan.fileName}</span>
+              <span className="text-xs text-neutral-500">
+                {filePlan.actions?.filter((a) => a.status !== "error").length ?? 0} action(s) ready ·{" "}
+                {filePlan.actions?.filter((a) => a.status === "error").length ?? 0} skipped
+              </span>
+            </div>
+            {filePlan.warnings && filePlan.warnings.length > 0 && (
+              <ul className="mt-2 flex flex-col gap-1 text-xs text-amber-300">
+                {filePlan.warnings.map((w, i) => (
+                  <li key={i}>⚠ {w}</li>
+                ))}
+              </ul>
+            )}
+            <ul className="mt-2 flex max-h-64 flex-col divide-y divide-neutral-800 overflow-y-auto">
+              {filePlan.actions?.map((action, i) => (
+                <li key={i} className="flex flex-col gap-0.5 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={action.status} />
+                    <span className="font-mono text-xs text-neutral-500">#{action.source}</span>
+                    {action.type && <span className="text-neutral-200">{action.type}</span>}
+                    <span className="text-neutral-400">{action.target}</span>
+                  </div>
+                  {action.message && <p className="ml-1 text-xs text-neutral-500">{action.message}</p>}
+                </li>
+              ))}
+            </ul>
+
+            {!fileResult && (
+              <div className="mt-3 flex justify-end">
+                <button
+                  onClick={handleApproveFile}
+                  disabled={fileExecuting || !filePlan.actions?.some((a) => a.status !== "error")}
+                  className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-900 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {fileExecuting ? "Executing…" : "Approve & Execute"}
+                </button>
+              </div>
+            )}
+
+            {fileResult?.ok && (
+              <div className="mt-4 border-t border-neutral-800 pt-3">
+                <div className="flex flex-wrap items-center gap-2 text-neutral-300">
+                  {fileResult.status && <StatusBadge status={fileResult.status} />}
+                  <span className="text-xs text-neutral-500">
+                    {fileResult.actions?.filter((a) => a.status === "success").length ?? 0} succeeded ·{" "}
+                    {fileResult.actions?.filter((a) => a.status === "failed").length ?? 0} failed
+                  </span>
+                </div>
+                <ul className="mt-2 flex flex-col gap-1">
+                  {fileResult.actions?.map((action, i) => (
+                    <li key={i} className="flex items-center gap-2 text-xs text-neutral-300">
+                      <StatusBadge status={action.status} />
+                      <span>{action.type}</span>
+                      {action.error && <span className="text-red-400">— {action.error}</span>}
+                    </li>
+                  ))}
+                </ul>
+                {fileResult.status === "awaiting_confirmation" && (
+                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                    <span className="flex-1">This plan includes a destructive or high-impact action — confirm before it runs.</span>
+                    <button onClick={() => handleConfirmFile(false)} className="rounded border border-neutral-700 px-2 py-1 text-neutral-300 hover:bg-neutral-800">
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleConfirmFile(true)}
+                      disabled={fileExecuting}
+                      className="rounded bg-amber-500 px-2 py-1 font-medium text-neutral-900 hover:bg-amber-400 disabled:opacity-50"
+                    >
+                      {fileExecuting ? "Running…" : "Approve & Execute"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {fileResult && !fileResult.ok && (
+              <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                {fileResult.error?.message}
               </div>
             )}
           </div>

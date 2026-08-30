@@ -123,23 +123,38 @@ STRUCTURED RESULT -> DASHBOARD
 
 ## THINK vs DO
 
-- **The agent (THINK)** receives the natural-language request and a fixed
-  set of client-side "function tools" — exactly the six actions in
-  `lib/actions/allowlist.ts`. It can only ever propose calls to those
-  tools; it has no network path to GoHighLevel, n8n, or Supabase, and
-  holds no credentials for any of them.
+- **The agent (THINK)** receives the natural-language request (or, for a
+  file upload, one instruction line at a time) and a fixed set of
+  client-side "function tools" — the full action registry in
+  `lib/actions/allowlist.ts` (28 actions as of this build; see the README's
+  action-registry table for the current list and each one's verification
+  status). It can only ever propose calls to those tools; it has no
+  network path to GoHighLevel, n8n, or Supabase, and holds no credentials
+  for any of them. A structured CSV row skips the agent entirely and maps
+  to an action deterministically (`lib/files/csv.ts`) — no reasoning is
+  needed for already-structured data.
 - **The backend (seam)**, in `lib/orchestration/execute.ts`, receives the
-  agent's proposed actions and re-validates each one against the same
-  allowlist server-side — independent of whether the agent adapter already
-  filtered. This is not a formality: a future or misbehaving agent adapter
-  cannot get a disallowed action executed no matter what it returns.
+  proposed actions (from the agent or a parsed file) and re-validates each
+  one against the same allowlist server-side — independent of whether the
+  agent adapter/parser already filtered. It then resolves any name/email/
+  stage-name hint into a real GoHighLevel ID (`lib/orchestration/resolvers.ts`
+  — never invents one), and gates any action marked `"destructive"` in
+  `MUTATION_TIER` behind an explicit human confirmation before it's ever
+  dispatched.
+- **The action registry** (`lib/actions/registry.ts`) is the only place
+  that turns an action type + resolved payload into a real GoHighLevel
+  HTTP request (method/path/body). This is what lets the action set grow
+  without n8n ever needing a new workflow or branch — see below.
 - **n8n (DO)** is the only layer that holds GoHighLevel credentials in a
-  real deployment. It validates the payload again, performs the actual API
-  call, logs the execution, and returns structured JSON. Locally,
-  `MockN8nClient` runs this same contract in-process against `MockGhlClient`
-  or `RealGhlClient` (whichever `GHL_ADAPTER` selects), so the "n8n
-  validates, then calls GHL" behavior is genuinely exercised, not stubbed
-  out — see `lib/n8n/README.md`.
+  real deployment. Each of the three GHL-facing workflows contains one
+  generic HTTP node that executes exactly the request the backend already
+  built (`ghlRequest`) — it validates the envelope again, performs the
+  actual API call, logs the execution, and returns structured JSON. It
+  never decides *what* to call. Locally, `MockN8nClient` runs this same
+  contract in-process against `MockGhlClient` or `RealGhlClient`
+  (whichever `GHL_ADAPTER` selects), so the "n8n validates, then calls
+  GHL" behavior is genuinely exercised, not stubbed out — see
+  `lib/n8n/README.md`.
 
 ## Adapter boundaries
 
@@ -175,23 +190,39 @@ of accidentally calling the live CRM.
 - **n8n**: the webhook request/response contract
   (`N8nExecuteRequest`/`N8nExecuteResult` in `lib/n8n/types.ts`) is this
   project's own design, since n8n workflows are user-authored — there is
-  no third-party contract to verify against. `n8n/workflows/*.json` are
-  genuine, importable n8n exports (standard schema) built from the
-  verified GHL contract, but have not been run against a live n8n
-  instance — see `n8n/workflows/README.md` for that caveat.
+  no third-party contract to verify against. All three GHL-facing
+  workflows and the shared logger are live, active, and have been
+  exercised end to end with real webhook calls during development
+  (including a real create → tag → delete round-trip and a live test of
+  the destructive-action confirmation gate) — see
+  `n8n/workflows/README.md`.
 
-## Agent safety — action allowlist
+## Agent safety — action registry and confirmation gate
 
 Allowed (`lib/actions/allowlist.ts`, used both as the tool schema
 advertised to the agent and as the independent server-side check in
-`lib/orchestration/execute.ts`):
+`lib/orchestration/execute.ts` — see the README's action-registry table
+for the full current list, grouped by GHL resource, and each one's
+verification status).
 
-`GET_CONTACT`, `GET_OPPORTUNITY`, `UPDATE_CONTACT`, `UPDATE_OPPORTUNITY`,
-`CREATE_TASK`, `ADD_NOTE`
+Unlike the original 6-action version of this system, destructive actions
+(`DELETE_CONTACT`, `DELETE_OPPORTUNITY`, `DELETE_TASK`,
+`DELETE_CUSTOM_FIELD`) and `SEND_MESSAGE` (a real message to a real
+customer) **are** in the registry now — but `MUTATION_TIER` in
+`lib/actions/allowlist.ts` marks them `"destructive"`, and
+`lib/orchestration/execute.ts` refuses to dispatch any destructive action
+without an explicit `confirm:true` from the caller. Without it, the
+request is left `awaiting_confirmation` with the full plan visible and
+nothing has touched GoHighLevel yet — this is the propose → human-approve
+→ execute gate the original design reserved `pending_approval` for,
+now actually wired up rather than just reserved.
 
-Never exposed to the agent: `DELETE_CONTACT`, `DELETE_OPPORTUNITY`,
-`BULK_DELETE`, `CHANGE_CREDENTIALS` — these are not filtered out, they are
-simply never offered as a tool, so the agent has no way to request them.
+Pipeline/stage create-update-delete are the one category **not** in the
+registry at all: this deployment's GoHighLevel Private Integration Token
+has pipelines *read* but not *write* scope (confirmed live — a create
+attempt returns `401 The token is not authorized for this scope`), so
+those actions are omitted rather than pretended to work. See the README's
+[GHL scopes](../README.md#ghl-scopes) section for how to grant that scope.
 If a destructive action is ever added, it must go through an explicit
 propose → human approval → execute gate; `automation_actions.status`
 already has a `pending_approval` value reserved for this, unused by any

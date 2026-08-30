@@ -1,69 +1,104 @@
 # n8n workflows
 
-Four modular workflows, matching `WORKFLOW_BY_ACTION` in
-[`lib/n8n/types.ts`](../../lib/n8n/types.ts) and the architecture's
-THINK/DO split — these are the real "DO" layer when `N8N_ADAPTER=http`.
-When `N8N_ADAPTER=mock` (the default), `MockN8nClient` in
+Three GoHighLevel-facing workflows, matching `WORKFLOW_BY_ACTION` in
+[`lib/n8n/types.ts`](../../lib/n8n/types.ts), plus one shared logging
+workflow — these are the real "DO" layer when `N8N_ADAPTER=http`. When
+`N8N_ADAPTER=mock` (the default), `MockN8nClient` in
 [`lib/n8n/client.ts`](../../lib/n8n/client.ts) runs the equivalent
 validate → call GHL → log contract in-process instead.
 
-## Status: actually deployed, credentials pending
+## Status: live, active, generic executor
 
-These four workflows are **live in a real, connected n8n Cloud account**
-(`vijaysharma04.app.n8n.cloud`) — built via the n8n MCP server, not just
-exported as static files. They are currently **inactive** because no
-credentials are attached yet. The JSON files here are an exact snapshot of
-what's deployed.
+All four workflows are **live and active in a real, connected n8n Cloud
+account** (`vijaysharma04.app.n8n.cloud`), fully credentialed, and
+live-tested end to end (including a real create → tag → delete round-trip
+against GoHighLevel dispatched through these exact workflows).
 
 | Workflow | n8n workflow ID | Production webhook URL | Handles |
 |---|---|---|---|
 | `execution-logger-workflow` | `l1AmbDI9rZG36jGx` | (called via Execute Sub-workflow, not a webhook) | shared logging sub-workflow |
-| `ghl-contact-workflow` | `7fXGzZ3t5LDxmzEZ` | `.../webhook/ghl-contact-workflow` | `GET_CONTACT`, `UPDATE_CONTACT` |
-| `ghl-opportunity-workflow` | `3x7is9oXX7zk5IB7` | `.../webhook/ghl-opportunity-workflow` | `GET_OPPORTUNITY`, `UPDATE_OPPORTUNITY` |
-| `ghl-task-workflow` | `A50aS059Vd31QRz3` | `.../webhook/ghl-task-workflow` | `CREATE_TASK`, `ADD_NOTE` |
+| `ghl-contact-workflow` | `7fXGzZ3t5LDxmzEZ` | `.../webhook/ghl-contact-workflow` | all `*_CONTACT`, `*_CUSTOM_FIELD`, `*_CONVERSATION*`, `SEND_MESSAGE`, `LIST_CALENDARS` |
+| `ghl-opportunity-workflow` | `3x7is9oXX7zk5IB7` | `.../webhook/ghl-opportunity-workflow` | all `*_OPPORTUNITY`, `LIST_PIPELINES` |
+| `ghl-task-workflow` | `A50aS059Vd31QRz3` | `.../webhook/ghl-task-workflow` | all `*_TASK`, `ADD_NOTE` |
 
-Each of the three GHL workflows follows: Webhook (header-auth) → validate
-input (Code node) → branch on action type (If node) → call the matching
-GoHighLevel endpoint (`services.leadconnectorhq.com`, verified live — see
-[`lib/ghl/README.md`](../../lib/ghl/README.md)) → call
-`execution-logger-workflow` (Execute Sub-workflow node) → respond with
-structured JSON (Respond to Webhook node). `execution-logger-workflow`
-itself uses n8n's native **Supabase node** (not a raw HTTP call) to insert
-into `execution_logs`.
+### Generic executor design
 
-## To finish setup (3 remaining steps)
+Each of the three GHL workflows follows the same shape:
 
-1. **n8n Webhook Shared Secret** — a Header Auth credential attached to
-   each workflow's Webhook node. Create one credential named
-   "n8n Webhook Shared Secret" with a header value matching this app's
-   `N8N_WEBHOOK_SECRET`, then attach it to the Webhook node in all three
-   GHL workflows (they were created referencing this credential by name;
-   n8n will prompt you to select/create it).
-2. **GoHighLevel Bearer Token** — a Header Auth credential (`Authorization:
-   Bearer <your Private Integration token>`) attached to the six GHL
-   `HTTP Request` nodes across the three workflows. **Note**: this n8n
-   instance's credential validation may reject a plain Header Auth
-   credential for a Bearer scheme — if so, use a **Custom Auth** /
-   templated credential instead, with template
-   `{"headers":{"Authorization":"Bearer {{api_key}}"}}`, and repoint each
-   HTTP Request node's `genericAuthType` to `httpTemplatedCustomAuth`.
-3. **Supabase** — a native Supabase credential (project URL + service role
-   key) attached to the `Insert into execution_logs` node in
-   `execution-logger-workflow`.
+```
+Webhook (header-auth: X-Webhook-Secret)
+  → Validate Input (Code node) — checks requestId/actionId/actionType/
+     payload/ghlRequest are present, and that actionType is one this
+     workflow is allowed to handle (a fixed list per workflow — defense in
+     depth, not the only check)
+  → GHL API Call (ONE generic HTTP Request node) — method, url, and body
+     all come from `ghlRequest` in the incoming payload, which the Next.js
+     backend already built via lib/actions/registry.ts. This node does not
+     know or care which action type it's running; it just executes exactly
+     what it was told, against services.leadconnectorhq.com with the
+     project's GHL credential and the required `Version: 2021-07-28` header.
+  → Log Execution (Execute Sub-workflow → execution-logger-workflow, which
+     uses n8n's native Supabase node) — set to `continueRegularOutput` so a
+     logging hiccup never swallows a successful GHL response (found and
+     fixed during live testing: without this, a Supabase insert failure
+     left the webhook returning an empty body even though the GHL call had
+     already succeeded).
+  → Respond to Webhook — reads the result explicitly from the `GHL API
+     Call` node by name (`$('GHL API Call').item.json`), not from
+     whatever node happens to run immediately before it, so the audit log's
+     own success/failure never changes what the caller sees. Always
+     responds HTTP 200; failure is signaled via the JSON body's own
+     `ok:false`, since n8n Cloud's edge proxy replaces non-2xx bodies with
+     a generic error page (confirmed live during earlier development).
+```
 
-Then activate all four workflows, and set in this app's `.env.local`:
-`N8N_ADAPTER=http`, `N8N_BASE_URL=https://vijaysharma04.app.n8n.cloud`,
-`N8N_WEBHOOK_SECRET=<the value from step 1>`.
+**Why this design**: adding a new GoHighLevel action never requires
+touching n8n. A new case in `buildGhlRequest()`
+(`lib/actions/registry.ts`) plus one line in the relevant workflow's
+`Validate Input` allowed-list is the entire change — no new HTTP node, no
+new branch, no new workflow. This is how the registry grew from 7 actions
+to 28 without creating a single new n8n workflow.
+
+## Credentials (already attached)
+
+- **Webhook auth**: `Header Auth account` (`X-Webhook-Secret` header,
+  matching `N8N_WEBHOOK_SECRET`) — on each workflow's Webhook node.
+- **GoHighLevel auth**: `Header Auth account 2` (`Authorization: Bearer
+  <this project's own Private Integration Token>`) — on each workflow's
+  `GHL API Call` node. **Never** the `Bearer Auth account` credential in
+  this n8n instance — that belongs to a different project.
+- **Supabase**: a native Supabase credential (project URL + service role
+  key) on `execution-logger-workflow`'s `Insert into execution_logs` node.
+
+To point this app at a different n8n instance: recreate the same three
+credentials there, redeploy these workflow definitions (or rebuild them
+following the shape above), and set `N8N_BASE_URL`/`N8N_WEBHOOK_SECRET` in
+`.env.local`.
 
 ## Request/response contract
 
 Every workflow receives the same shape from
-[`HttpN8nClient`](../../lib/n8n/client.ts):
+[`HttpN8nClient`](../../lib/n8n/client.ts) (built by
+`attachGhlRequest()`):
 
 ```json
-{ "requestId": "...", "actionId": "...", "actionType": "UPDATE_OPPORTUNITY", "payload": { "...": "..." } }
+{
+  "requestId": "...",
+  "actionId": "...",
+  "actionType": "UPDATE_OPPORTUNITY",
+  "payload": { "...": "..." },
+  "ghlRequest": { "method": "PUT", "path": "/opportunities/abc123", "body": { "...": "..." } }
+}
 ```
 
-and responds with `{ "ok": true, "response": { "...": "..." } }`, or a
-non-2xx status on failure — `HttpN8nClient` treats any non-2xx response as
-a failed execution and records the response body as the error.
+and responds `{ "ok": true, "response": { "...": "..." } }` on success, or
+`{ "ok": false, "error": { "message": "...", "httpCode": 502 } }` on
+failure — always HTTP 200; `HttpN8nClient` trusts the body's own `ok`
+field over the HTTP status.
+
+## A fifth, unrelated workflow
+
+`Lead Qualification & CRM Sync` also exists in this same n8n account (an
+AI lead-scoring + GHL sync pipeline built earlier). It is **not** part of
+this action-registry architecture, is not referenced anywhere in this
+codebase, and was left untouched.

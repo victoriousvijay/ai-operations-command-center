@@ -1,0 +1,4 @@
+Name,Email,Phone,Company,Action,Stage,Tags
+Priya Sharma,priya.sharma.e2e-test@example.com,+91 9000000001,Sharma Solar,Create Contact,,
+Olivia Bennett,,,,Update Opportunity,AI Qualified,
+Priya Sharma,priya.sharma.e2e-test@example.com,,,Add Tag,,hot-lead
