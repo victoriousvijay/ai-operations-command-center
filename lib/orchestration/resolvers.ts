@@ -102,7 +102,19 @@ export async function resolveOpportunityId(ghl: GhlClient, payload: Record<strin
     };
   }
 
-  return { payload: { ...rest, opportunityId: matches[0]!.id } };
+  const opportunity = matches[0]!;
+  return {
+    payload: {
+      ...rest,
+      opportunityId: opportunity.id,
+      // Carry the opportunity's real, already-known pipelineId forward so
+      // resolvePipelineStage can resolve a stage name unambiguously within
+      // THIS opportunity's pipeline, instead of searching every pipeline
+      // in the account and potentially finding the same stage name in more
+      // than one (a real case: "AI Qualified" exists in two pipelines here).
+      ...(opportunity.pipelineId ? { pipelineId: opportunity.pipelineId } : {}),
+    },
+  };
 }
 
 /**
@@ -128,7 +140,18 @@ export async function resolvePipelineStage(ghl: GhlClient, payload: Record<strin
 
   const pipelines = await ghl.listPipelines();
   let candidates = pipelines;
-  if (typeof pipelineNameHint === "string" && pipelineNameHint) {
+  const knownPipelineId = rest.pipelineId as string | undefined;
+  if (knownPipelineId) {
+    // A real pipelineId is already known (e.g. resolveOpportunityId
+    // already found which pipeline this existing opportunity lives in) —
+    // that's a stronger, unambiguous signal than a name, so use it
+    // instead of searching every pipeline in the account (which can
+    // legitimately have the same stage name in more than one place).
+    candidates = pipelines.filter((p) => p.id === knownPipelineId);
+    if (candidates.length === 0) {
+      return { payload: rest, error: `Could not find the opportunity's own pipeline ("${knownPipelineId}") to resolve stage "${stageNameHint}" against.` };
+    }
+  } else if (typeof pipelineNameHint === "string" && pipelineNameHint) {
     const nameLower = pipelineNameHint.toLowerCase();
     candidates = pipelines.filter((p) => p.name.toLowerCase().includes(nameLower));
     if (candidates.length === 0) {

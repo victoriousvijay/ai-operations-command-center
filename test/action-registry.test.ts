@@ -107,6 +107,21 @@ test("resolveOpportunityId finds the contact's single opportunity in real mode",
   }
 });
 
+test("resolveOpportunityId carries the opportunity's real pipelineId forward, so a later stage lookup is never ambiguous", async () => {
+  const previous = process.env.GHL_ADAPTER;
+  process.env.GHL_ADAPTER = "real";
+  try {
+    const ghl = fakeGhlClient({
+      searchOpportunities: async () => [{ id: "real-opp-1", name: "Solar Deal", pipelineId: "pipe-real-owner" } as GhlOpportunity],
+    });
+    const result = await resolveOpportunityId(ghl, { contactId: "real-contact-1", opportunityLookupHint: true });
+    assert.equal(result.error, undefined);
+    assert.equal(result.payload.pipelineId, "pipe-real-owner");
+  } finally {
+    process.env.GHL_ADAPTER = previous;
+  }
+});
+
 test("resolveOpportunityId errors clearly when the contact has no opportunity", async () => {
   const previous = process.env.GHL_ADAPTER;
   process.env.GHL_ADAPTER = "real";
@@ -152,6 +167,32 @@ test("resolvePipelineStage matches a stage name to real pipeline/stage IDs", asy
   try {
     const ghl = fakeGhlClient({ listPipelines: async () => [SOLAR_PIPELINE] });
     const result = await resolvePipelineStage(ghl, { pipelineStageId: "mock-stage-ai-qualified", stageNameHint: "AI Qualified" });
+    assert.equal(result.error, undefined);
+    assert.equal(result.payload.pipelineId, "pipe-solar");
+    assert.equal(result.payload.pipelineStageId, "stage-ai-qualified");
+  } finally {
+    process.env.GHL_ADAPTER = previous;
+  }
+});
+
+test("resolvePipelineStage uses an already-known pipelineId to disambiguate a stage name that exists in more than one pipeline (real bug: this used to error as ambiguous)", async () => {
+  const previous = process.env.GHL_ADAPTER;
+  process.env.GHL_ADAPTER = "real";
+  try {
+    const otherPipeline: GhlPipeline = {
+      id: "pipe-other",
+      name: "AI automation sales Pipeline",
+      stages: [{ id: "other-stage-ai-qualified", name: "AI Qualified", position: 0 }],
+    };
+    const ghl = fakeGhlClient({ listPipelines: async () => [SOLAR_PIPELINE, otherPipeline] });
+    // pipelineId is already known (as if resolveOpportunityId already found
+    // this opportunity's real pipeline) — must NOT search every pipeline
+    // and hit the "matches more than one pipeline" ambiguity error.
+    const result = await resolvePipelineStage(ghl, {
+      pipelineId: "pipe-solar",
+      pipelineStageId: "mock-stage-ai-qualified",
+      stageNameHint: "AI Qualified",
+    });
     assert.equal(result.error, undefined);
     assert.equal(result.payload.pipelineId, "pipe-solar");
     assert.equal(result.payload.pipelineStageId, "stage-ai-qualified");

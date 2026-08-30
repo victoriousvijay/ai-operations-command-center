@@ -317,6 +317,18 @@ export async function executeStructuredActions(params: {
   return dispatchProposal(request.id, params.intent, params.actions, params.contactIdOverride, params.confirm);
 }
 
+/**
+ * Only actions marked "destructive" in MUTATION_TIER ever require
+ * confirmation — everything else in the same batch (contact creates,
+ * tags, tasks, notes, non-destructive opportunity moves, etc.) dispatches
+ * immediately, regardless of what else is in the batch. An earlier
+ * version of this function paused the ENTIRE batch the moment any one
+ * action was destructive, which meant a single SEND_MESSAGE or DELETE_*
+ * in a large file plan blocked dozens of unrelated, perfectly safe
+ * actions too — that was a real bug, not the intended design (see
+ * ARCHITECTURE.md's safety model: confirmation scales with an action's
+ * own risk, not its neighbors').
+ */
 async function dispatchProposal(
   requestId: string,
   intent: string,
@@ -324,12 +336,24 @@ async function dispatchProposal(
   contactIdOverride: string | undefined,
   confirm: boolean | undefined,
 ): Promise<ExecuteResult> {
-  const destructive = actions.filter((a) => isAllowedAction(a.type) && MUTATION_TIER[a.type] === "destructive");
+  const destructiveActions: ProposedAction[] = [];
+  const safeActions: ProposedAction[] = [];
+  for (const proposed of actions) {
+    if (isAllowedAction(proposed.type) && MUTATION_TIER[proposed.type] === "destructive") {
+      destructiveActions.push(proposed);
+    } else {
+      safeActions.push(proposed);
+    }
+  }
 
-  if (destructive.length > 0 && !confirm) {
-    await updateAutomationRequest(requestId, { status: "awaiting_confirmation" });
-    const results: ExecutedActionResult[] = [];
-    for (const proposed of actions) {
+  await updateAutomationRequest(requestId, { status: "executing" });
+  const results: ExecutedActionResult[] = [];
+  for (const proposed of safeActions) {
+    results.push(await dispatchAction(requestId, proposed, contactIdOverride));
+  }
+
+  if (destructiveActions.length > 0 && !confirm) {
+    for (const proposed of destructiveActions) {
       if (!isAllowedAction(proposed.type)) {
         results.push({ type: proposed.type as AllowedAction, status: "failed", error: "Action type is not in the allowlist." });
         continue;
@@ -342,12 +366,11 @@ async function dispatchProposal(
       });
       results.push({ type: action.actionType, status: "pending_approval", payload: proposed.payload });
     }
+    await updateAutomationRequest(requestId, { status: "awaiting_confirmation" });
     return { requestId, status: "awaiting_confirmation", intent, actions: results, confirmRequestId: requestId };
   }
 
-  await updateAutomationRequest(requestId, { status: "executing" });
-  const results: ExecutedActionResult[] = [];
-  for (const proposed of actions) {
+  for (const proposed of destructiveActions) {
     results.push(await dispatchAction(requestId, proposed, contactIdOverride));
   }
 
@@ -372,8 +395,16 @@ export async function resumeAwaitingConfirmation(requestId: string, contactIdOve
 
   await updateAutomationRequest(requestId, { status: "executing" });
   const results: ExecutedActionResult[] = [];
-  for (const pending of existing.actions) {
-    results.push(await dispatchAction(requestId, { type: pending.actionType, payload: pending.payload }, contactIdOverride));
+  for (const action of existing.actions) {
+    // Only actions still pending_approval were held back — anything else
+    // (a safe action from the same batch) already ran before the gate and
+    // must never be re-dispatched here, or it would run twice for real.
+    if (action.status === "pending_approval") {
+      results.push(await dispatchAction(requestId, { type: action.actionType, payload: action.payload }, contactIdOverride));
+    } else {
+      const errorMessage = typeof action.response?.error === "string" ? action.response.error : undefined;
+      results.push({ type: action.actionType, status: action.status, ...(errorMessage ? { error: errorMessage } : {}) });
+    }
   }
 
   const finalStatus = overallStatus(results);
