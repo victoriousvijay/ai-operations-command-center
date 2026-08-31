@@ -47,6 +47,33 @@ interface FileParseResponse {
   error?: { type: string; message: string };
 }
 
+/**
+ * One command submission tracked independently of all others, so firing
+ * off a second (or third) command never has to wait for an earlier one's
+ * Enhance/Execute call to finish — each runs its own async request and
+ * renders its own card. Previously the whole command area was three
+ * shared slots (one suggestions list, one result, one "submitting" flag),
+ * which serialized every command through the UI even though the backend
+ * itself has always supported concurrent requests.
+ */
+interface Submission {
+  id: string;
+  requestText: string;
+  kind: "enhance" | "execute";
+  status: "pending" | "done" | "error";
+  suggestions?: CommandSuggestionView[];
+  suggestError?: string;
+  result?: ExecuteResponse;
+  confirming?: boolean;
+  selecting?: boolean;
+}
+
+let submissionCounter = 0;
+function nextSubmissionId(): string {
+  submissionCounter += 1;
+  return `sub-${submissionCounter}`;
+}
+
 function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
     month: "short",
@@ -95,14 +122,11 @@ export function Dashboard() {
 
   const [userRequest, setUserRequest] = useState("");
   const [contactIdOverride, setContactIdOverride] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [lastResult, setLastResult] = useState<ExecuteResponse | null>(null);
-  const [confirming, setConfirming] = useState(false);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
 
-  const [suggesting, setSuggesting] = useState(false);
-  const [suggestions, setSuggestions] = useState<CommandSuggestionView[] | null>(null);
-  const [suggestError, setSuggestError] = useState<string | null>(null);
-  const [selectingSuggestion, setSelectingSuggestion] = useState(false);
+  function patchSubmission(id: string, patch: Partial<Submission>) {
+    setSubmissions((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  }
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -145,113 +169,121 @@ export function Dashboard() {
     loadDashboardData();
   }, [loadDashboardData]);
 
-  async function handleExecute() {
-    if (!userRequest.trim() || submitting) return;
-    setSubmitting(true);
-    setLastResult(null);
+  /**
+   * Fires a command and immediately clears the input so the next one can
+   * be typed and submitted right away — this submission finishes
+   * whenever its own request resolves, independent of any others
+   * already in flight. Each gets its own card in the list below.
+   */
+  function handleExecute() {
+    const text = userRequest.trim();
+    if (!text) return;
+    setUserRequest("");
+    const id = nextSubmissionId();
+    setSubmissions((prev) => [{ id, requestText: text, kind: "execute", status: "pending" }, ...prev]);
 
-    try {
-      const response = await fetch("/api/execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userRequest,
-          ...(contactIdOverride.trim() ? { contactIdOverride: contactIdOverride.trim() } : {}),
-        }),
-      });
-      const json = (await response.json()) as ExecuteResponse;
-      setLastResult(json);
-      await loadDashboardData();
-    } catch (error) {
-      setLastResult({
-        ok: false,
-        error: {
-          type: "network_error",
-          message: error instanceof Error ? error.message : "Request failed.",
-        },
-      });
-    } finally {
-      setSubmitting(false);
-    }
+    (async () => {
+      try {
+        const response = await fetch("/api/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userRequest: text,
+            ...(contactIdOverride.trim() ? { contactIdOverride: contactIdOverride.trim() } : {}),
+          }),
+        });
+        const json = (await response.json()) as ExecuteResponse;
+        patchSubmission(id, { status: "done", result: json });
+        await loadDashboardData();
+      } catch (error) {
+        patchSubmission(id, {
+          status: "done",
+          result: { ok: false, error: { type: "network_error", message: error instanceof Error ? error.message : "Request failed." } },
+        });
+      }
+    })();
   }
 
   /**
    * "Refine my sentence into a command": asks the agent to turn loose
    * English into one or more candidate structured actions (never
    * executes any of them) so the user can pick the one they actually
-   * meant before anything touches GoHighLevel.
+   * meant before anything touches GoHighLevel. Runs as its own
+   * submission, same as handleExecute — the input clears right away so
+   * another command can be typed while this one is still thinking.
    */
-  async function handleSuggest() {
-    if (!userRequest.trim() || suggesting) return;
-    setSuggesting(true);
-    setSuggestions(null);
-    setSuggestError(null);
-    setLastResult(null);
-    try {
-      const response = await fetch("/api/suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userRequest }),
-      });
-      const json = (await response.json()) as SuggestResponse;
-      if (!json.ok) {
-        setSuggestError(json.error?.message ?? "Could not interpret this request.");
-      } else if (!json.suggestions || json.suggestions.length === 0) {
-        setSuggestError("No matching commands found — try rephrasing, or name the action and person more explicitly.");
-      } else {
-        setSuggestions(json.suggestions);
+  function handleSuggest() {
+    const text = userRequest.trim();
+    if (!text) return;
+    setUserRequest("");
+    const id = nextSubmissionId();
+    setSubmissions((prev) => [{ id, requestText: text, kind: "enhance", status: "pending" }, ...prev]);
+
+    (async () => {
+      try {
+        const response = await fetch("/api/suggest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userRequest: text }),
+        });
+        const json = (await response.json()) as SuggestResponse;
+        if (!json.ok) {
+          patchSubmission(id, { status: "error", suggestError: json.error?.message ?? "Could not interpret this request." });
+        } else if (!json.suggestions || json.suggestions.length === 0) {
+          patchSubmission(id, {
+            status: "error",
+            suggestError: "No matching commands found — try rephrasing, or name the action and person more explicitly.",
+          });
+        } else {
+          patchSubmission(id, { status: "done", suggestions: json.suggestions });
+        }
+      } catch (error) {
+        patchSubmission(id, { status: "error", suggestError: error instanceof Error ? error.message : "Request failed." });
       }
-    } catch (error) {
-      setSuggestError(error instanceof Error ? error.message : "Request failed.");
-    } finally {
-      setSuggesting(false);
-    }
+    })();
   }
 
-  async function handleSelectSuggestion(suggestion: CommandSuggestionView) {
-    if (selectingSuggestion) return;
-    setSelectingSuggestion(true);
+  async function handleSelectSuggestion(submission: Submission, suggestion: CommandSuggestionView) {
+    if (submission.selecting) return;
+    patchSubmission(submission.id, { selecting: true });
     try {
       const response = await fetch("/api/files/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          intent: userRequest,
+          intent: submission.requestText,
           actions: [{ type: suggestion.type, payload: suggestion.payload }],
         }),
       });
       const json = (await response.json()) as ExecuteResponse;
-      setLastResult(json);
-      setSuggestions(null);
+      patchSubmission(submission.id, { selecting: false, suggestions: undefined, result: json });
       await loadDashboardData();
     } catch (error) {
-      setLastResult({
-        ok: false,
-        error: { type: "network_error", message: error instanceof Error ? error.message : "Request failed." },
+      patchSubmission(submission.id, {
+        selecting: false,
+        result: { ok: false, error: { type: "network_error", message: error instanceof Error ? error.message : "Request failed." } },
       });
-    } finally {
-      setSelectingSuggestion(false);
     }
   }
 
-  async function handleConfirm(approve: boolean) {
-    if (!lastResult?.confirmRequestId || confirming) return;
+  async function handleConfirm(submission: Submission, approve: boolean) {
+    if (!submission.result?.confirmRequestId || submission.confirming) return;
     if (!approve) {
-      setLastResult(null);
+      patchSubmission(submission.id, { result: undefined });
       return;
     }
-    setConfirming(true);
+    patchSubmission(submission.id, { confirming: true });
     try {
       const response = await fetch("/api/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmRequestId: lastResult.confirmRequestId, confirm: true }),
+        body: JSON.stringify({ confirmRequestId: submission.result.confirmRequestId, confirm: true }),
       });
       const json = (await response.json()) as ExecuteResponse;
-      setLastResult(json);
+      patchSubmission(submission.id, { confirming: false, result: json });
       await loadDashboardData();
     } finally {
-      setConfirming(false);
+      patchSubmission(submission.id, { confirming: false });
     }
   }
 
@@ -361,113 +393,139 @@ export function Dashboard() {
         <div className="mt-3 flex items-center gap-2">
           <button
             onClick={handleSuggest}
-            disabled={suggesting || !userRequest.trim()}
+            disabled={!userRequest.trim()}
             className="rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2 text-sm font-medium text-neutral-100 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
-            title="Turn this loose sentence into one or more precise candidate commands to pick from — nothing runs until you choose one."
+            title="Turn this loose sentence into one or more precise candidate commands to pick from — nothing runs until you choose one. Submitting clears the box immediately so you can queue up another command right away."
           >
-            {suggesting ? "Enhancing…" : "✨ Enhance Command"}
+            ✨ Enhance Command
           </button>
           <button
             onClick={handleExecute}
-            disabled={submitting || !userRequest.trim()}
+            disabled={!userRequest.trim()}
             className="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {submitting ? "Executing…" : "Execute Request"}
+            Execute Request
           </button>
+          {submissions.some((s) => s.status === "pending") && (
+            <span className="text-xs text-neutral-500">
+              {submissions.filter((s) => s.status === "pending").length} in progress — feel free to queue up another
+            </span>
+          )}
         </div>
 
-        {suggestError && (
-          <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
-            {suggestError}
-          </div>
-        )}
-
-        {suggestions && suggestions.length > 0 && (
-          <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950 p-4">
-            <p className="text-xs text-neutral-500">
-              {suggestions.length === 1 ? "Enhanced command — did you mean:" : "Enhanced into a few possibilities — which did you mean?"}
-            </p>
-            <ul className="mt-2 flex flex-col gap-2">
-              {suggestions.map((s, i) => (
-                <li key={i}>
-                  <button
-                    onClick={() => handleSelectSuggestion(s)}
-                    disabled={selectingSuggestion}
-                    className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-left text-sm text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <span className="mr-2 font-mono text-xs text-neutral-500">{s.type}</span>
-                    {s.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <button
-              onClick={() => setSuggestions(null)}
-              className="mt-2 text-xs text-neutral-500 hover:text-neutral-300"
-            >
-              None of these — cancel
-            </button>
-          </div>
-        )}
-
-        {lastResult && (
-          <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950 p-4 text-sm">
-            {lastResult.ok ? (
-              <div className="flex flex-col gap-2">
+        {submissions.length > 0 && (
+          <div className="mt-4 flex flex-col gap-3">
+            {submissions.map((submission) => (
+              <div key={submission.id} className="rounded-lg border border-neutral-800 bg-neutral-950 p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2 text-neutral-300">
-                  <span className="font-mono text-xs text-neutral-500">{lastResult.requestId}</span>
-                  {lastResult.status && <StatusBadge status={lastResult.status} />}
-                  {lastResult.intent && (
-                    <span className="text-xs text-neutral-500">intent: {lastResult.intent}</span>
+                  {submission.status === "pending" && <StatusBadge status="executing" />}
+                  {submission.status === "error" && <StatusBadge status="failed" />}
+                  {submission.status === "done" && submission.result && <StatusBadge status={submission.result.status ?? (submission.result.ok ? "success" : "failed")} />}
+                  {submission.status === "done" && submission.suggestions && <StatusBadge status="success" />}
+                  <span className="text-xs text-neutral-500">
+                    {submission.kind === "enhance" ? "Enhance" : "Execute"}:
+                  </span>
+                  <span className="text-neutral-200">{submission.requestText}</span>
+                  {submission.status === "pending" && (
+                    <span className="text-xs text-neutral-500">
+                      {submission.kind === "enhance" ? "enhancing…" : "executing…"}
+                    </span>
                   )}
                 </div>
-                <ul className="flex flex-col gap-1">
-                  {lastResult.actions?.map((action, i) => (
-                    <li key={i} className="flex flex-col gap-0.5 text-neutral-300">
-                      <div className="flex items-center gap-2">
-                        <StatusBadge status={action.status} />
-                        <span>{action.type}</span>
-                        {action.error && <span className="text-xs text-red-400">— {action.error}</span>}
-                      </div>
-                      {action.status === "pending_approval" && action.payload && (
-                        <pre className="ml-1 whitespace-pre-wrap rounded bg-neutral-900 px-2 py-1 text-[11px] text-neutral-500">
-                          {JSON.stringify(action.payload)}
-                        </pre>
-                      )}
-                    </li>
-                  ))}
-                  {lastResult.actions?.length === 0 && (
-                    <li className="text-neutral-500">
-                      No allowed action was matched for this request.
-                    </li>
-                  )}
-                </ul>
-                {lastResult.status === "awaiting_confirmation" && (
-                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                    <span className="flex-1">
-                      This includes a destructive or high-impact action — confirm before it runs.
-                    </span>
+
+                {submission.status === "error" && submission.suggestError && (
+                  <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                    {submission.suggestError}
+                  </div>
+                )}
+
+                {submission.suggestions && submission.suggestions.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-xs text-neutral-500">
+                      {submission.suggestions.length === 1 ? "Enhanced command — did you mean:" : "Enhanced into a few possibilities — which did you mean?"}
+                    </p>
+                    <ul className="mt-2 flex flex-col gap-2">
+                      {submission.suggestions.map((s, i) => (
+                        <li key={i}>
+                          <button
+                            onClick={() => handleSelectSuggestion(submission, s)}
+                            disabled={submission.selecting}
+                            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-left text-sm text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <span className="mr-2 font-mono text-xs text-neutral-500">{s.type}</span>
+                            {s.label}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
                     <button
-                      onClick={() => handleConfirm(false)}
-                      className="rounded border border-neutral-700 px-2 py-1 text-neutral-300 hover:bg-neutral-800"
+                      onClick={() => patchSubmission(submission.id, { suggestions: undefined })}
+                      className="mt-2 text-xs text-neutral-500 hover:text-neutral-300"
                     >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => handleConfirm(true)}
-                      disabled={confirming}
-                      className="rounded bg-amber-500 px-2 py-1 font-medium text-neutral-900 hover:bg-amber-400 disabled:opacity-50"
-                    >
-                      {confirming ? "Running…" : "Approve & Execute"}
+                      None of these — cancel
                     </button>
                   </div>
                 )}
+
+                {submission.result && (
+                  <div className="mt-3">
+                    {submission.result.ok ? (
+                      <div className="flex flex-col gap-2">
+                        <div className="flex flex-wrap items-center gap-2 text-neutral-300">
+                          <span className="font-mono text-xs text-neutral-500">{submission.result.requestId}</span>
+                          {submission.result.intent && (
+                            <span className="text-xs text-neutral-500">intent: {submission.result.intent}</span>
+                          )}
+                        </div>
+                        <ul className="flex flex-col gap-1">
+                          {submission.result.actions?.map((action, i) => (
+                            <li key={i} className="flex flex-col gap-0.5 text-neutral-300">
+                              <div className="flex items-center gap-2">
+                                <StatusBadge status={action.status} />
+                                <span>{action.type}</span>
+                                {action.error && <span className="text-xs text-red-400">— {action.error}</span>}
+                              </div>
+                              {action.status === "pending_approval" && action.payload && (
+                                <pre className="ml-1 whitespace-pre-wrap rounded bg-neutral-900 px-2 py-1 text-[11px] text-neutral-500">
+                                  {JSON.stringify(action.payload)}
+                                </pre>
+                              )}
+                            </li>
+                          ))}
+                          {submission.result.actions?.length === 0 && (
+                            <li className="text-neutral-500">No allowed action was matched for this request.</li>
+                          )}
+                        </ul>
+                        {submission.result.status === "awaiting_confirmation" && (
+                          <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                            <span className="flex-1">
+                              This includes a destructive or high-impact action — confirm before it runs.
+                            </span>
+                            <button
+                              onClick={() => handleConfirm(submission, false)}
+                              className="rounded border border-neutral-700 px-2 py-1 text-neutral-300 hover:bg-neutral-800"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => handleConfirm(submission, true)}
+                              disabled={submission.confirming}
+                              className="rounded bg-amber-500 px-2 py-1 font-medium text-neutral-900 hover:bg-amber-400 disabled:opacity-50"
+                            >
+                              {submission.confirming ? "Running…" : "Approve & Execute"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-red-300">
+                        {submission.result.error?.type}: {submission.result.error?.message}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="text-red-300">
-                {lastResult.error?.type}: {lastResult.error?.message}
-              </div>
-            )}
+            ))}
           </div>
         )}
       </section>
