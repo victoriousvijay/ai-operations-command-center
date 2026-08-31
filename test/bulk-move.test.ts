@@ -59,6 +59,10 @@ function fakeGhlClient(overrides: Partial<GhlClient>): GhlClient {
     createAppointment: notUsed,
     updateAppointment: notUsed,
     deleteAppointment: notUsed,
+    listWorkflows: notUsed,
+    addContactToWorkflow: notUsed,
+    removeContactFromWorkflow: notUsed,
+    listCampaigns: notUsed,
     ...overrides,
   };
 }

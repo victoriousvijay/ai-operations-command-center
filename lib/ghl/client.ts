@@ -14,6 +14,7 @@ import {
   type ContactTagInput,
   type GhlAppointment,
   type GhlCalendar,
+  type GhlCampaign,
   type GhlClient,
   type GhlContact,
   type GhlConversation,
@@ -23,6 +24,7 @@ import {
   type GhlPipeline,
   type GhlTask,
   type GhlUser,
+  type GhlWorkflow,
   type SearchAppointmentsInput,
   type SearchContactsInput,
   type SearchOpportunitiesInput,
@@ -33,6 +35,7 @@ import {
   type UpdateOpportunityInput,
   type UpdatePipelineInput,
   type UpdateTaskInput,
+  type WorkflowContactInput,
   type UpsertContactInput,
 } from "./types";
 
@@ -99,6 +102,17 @@ import {
  *     Also: /calendars/events requires calendarId, userId, or groupId —
  *     there is no way to search appointments by contactId alone (confirmed
  *     live via a 422 "property contactId should not exist").
+ *   - Workflows: GET /workflows/ to list, POST/DELETE
+ *     /contacts/:id/workflow/:workflowId to enroll/remove — verified live
+ *     with a real enroll → remove round-trip against a DRAFT workflow
+ *     (a draft doesn't fire real emails/SMS the way a published one
+ *     would). GHL's API has no endpoint to create a workflow or edit its
+ *     internal steps — those stay UI-only.
+ *   - Campaigns: GET /campaigns/ verified live (returns an empty list —
+ *     this location has none configured). No create-campaign endpoint
+ *     exists in GHL's API (campaigns are UI-only, like workflow steps),
+ *     so add/remove-contact-to-campaign isn't implemented — there was no
+ *     real campaign to verify it against.
  *   - Lead assignment: PUT /contacts/:id with {"assignedTo": "<userId>"} is
  *     a real, processed field, confirmed live: a bogus user ID returns a
  *     404 (GHL tried and failed to resolve it), not a 422 validation
@@ -514,6 +528,36 @@ export class RealGhlClient implements GhlClient {
     await this.request(`/calendars/events/${appointmentId}`, { method: "DELETE" });
     return { success: true };
   }
+
+  // ── Workflows ─────────────────────────────────────────────────────────
+  async listWorkflows(): Promise<GhlWorkflow[]> {
+    const locationId = this.requireLocationId("workflow listing");
+    const data = await this.request<{ workflows: GhlWorkflow[] }>(`/workflows/?locationId=${locationId}`);
+    return data.workflows ?? [];
+  }
+
+  async addContactToWorkflow(input: WorkflowContactInput): Promise<{ success: true }> {
+    await this.request(`/contacts/${input.contactId}/workflow/${input.workflowId}`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    return { success: true };
+  }
+
+  async removeContactFromWorkflow(input: WorkflowContactInput): Promise<{ success: true }> {
+    await this.request(`/contacts/${input.contactId}/workflow/${input.workflowId}`, {
+      method: "DELETE",
+      body: JSON.stringify({}),
+    });
+    return { success: true };
+  }
+
+  // ── Campaigns ─────────────────────────────────────────────────────────
+  async listCampaigns(): Promise<GhlCampaign[]> {
+    const locationId = this.requireLocationId("campaign listing");
+    const data = await this.request<{ campaigns: GhlCampaign[] }>(`/campaigns/?locationId=${locationId}`);
+    return data.campaigns ?? [];
+  }
 }
 
 /**
@@ -835,5 +879,21 @@ export class MockGhlClient implements GhlClient {
 
   async deleteAppointment(): Promise<{ success: true }> {
     return { success: true };
+  }
+
+  async listWorkflows(): Promise<GhlWorkflow[]> {
+    return [{ id: "mock-workflow-1", name: "Mock Workflow", status: "published" }];
+  }
+
+  async addContactToWorkflow(): Promise<{ success: true }> {
+    return { success: true };
+  }
+
+  async removeContactFromWorkflow(): Promise<{ success: true }> {
+    return { success: true };
+  }
+
+  async listCampaigns(): Promise<GhlCampaign[]> {
+    return [{ id: "mock-campaign-1", name: "Mock Campaign", status: "active" }];
   }
 }

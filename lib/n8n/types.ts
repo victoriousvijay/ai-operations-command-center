@@ -60,6 +60,10 @@ export const WORKFLOW_BY_ACTION: Record<AllowedAction, string> = {
   CREATE_APPOINTMENT: "ghl-contact-workflow",
   UPDATE_APPOINTMENT: "ghl-contact-workflow",
   DELETE_APPOINTMENT: "ghl-contact-workflow",
+  LIST_WORKFLOWS: "ghl-contact-workflow",
+  ADD_CONTACT_TO_WORKFLOW: "ghl-contact-workflow",
+  REMOVE_CONTACT_FROM_WORKFLOW: "ghl-contact-workflow",
+  LIST_CAMPAIGNS: "ghl-contact-workflow",
 
   SEARCH_OPPORTUNITIES: "ghl-opportunity-workflow",
   GET_OPPORTUNITY: "ghl-opportunity-workflow",

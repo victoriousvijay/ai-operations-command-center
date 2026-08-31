@@ -86,6 +86,20 @@ export const ALLOWED_ACTIONS = [
   "CREATE_APPOINTMENT",
   "UPDATE_APPOINTMENT",
   "DELETE_APPOINTMENT",
+  // Workflows — enroll/remove verified live against a real draft workflow
+  // (a draft doesn't fire real emails/SMS to the test contact, unlike a
+  // published one). Only list/enroll/remove exist here: GHL's API has no
+  // way to create or edit a workflow's own steps — those are built in the
+  // GHL UI only.
+  "LIST_WORKFLOWS",
+  "ADD_CONTACT_TO_WORKFLOW",
+  "REMOVE_CONTACT_FROM_WORKFLOW",
+  // Campaigns — read-only. This location has zero campaigns configured
+  // and GHL's API has no create-campaign endpoint (campaigns, like
+  // workflows' internal steps, are UI-only) — add/remove-contact-to-
+  // campaign is deliberately NOT included here since there was no real
+  // campaign to verify it against live.
+  "LIST_CAMPAIGNS",
 ] as const;
 
 export type AllowedAction = (typeof ALLOWED_ACTIONS)[number];
@@ -163,4 +177,11 @@ export const MUTATION_TIER: Record<AllowedAction, "readonly" | "mutating" | "des
   // DELETE_APPOINTMENT, so this stays "mutating" not "destructive".
   UPDATE_APPOINTMENT: "mutating",
   DELETE_APPOINTMENT: "destructive",
+
+  LIST_WORKFLOWS: "readonly",
+  ADD_CONTACT_TO_WORKFLOW: "mutating",
+  // Reversible (the contact just stops progressing) — not destructive.
+  REMOVE_CONTACT_FROM_WORKFLOW: "mutating",
+
+  LIST_CAMPAIGNS: "readonly",
 };

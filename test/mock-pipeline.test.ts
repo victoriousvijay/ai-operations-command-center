@@ -64,6 +64,10 @@ function fakeGhlClient(contacts: GhlContact[]): GhlClient {
     createAppointment: notUsed,
     updateAppointment: notUsed,
     deleteAppointment: notUsed,
+    listWorkflows: notUsed,
+    addContactToWorkflow: notUsed,
+    removeContactFromWorkflow: notUsed,
+    listCampaigns: notUsed,
   };
 }
 

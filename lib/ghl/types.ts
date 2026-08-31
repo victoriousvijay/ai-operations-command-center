@@ -95,6 +95,18 @@ export interface GhlAppointment {
   appointmentStatus?: "confirmed" | "cancelled" | "showed" | "noshow" | "invalid";
 }
 
+export interface GhlWorkflow {
+  id: string;
+  name: string;
+  status?: "draft" | "published";
+}
+
+export interface GhlCampaign {
+  id: string;
+  name: string;
+  status?: string;
+}
+
 // ── Contacts ────────────────────────────────────────────────────────────
 export interface CreateContactInput {
   firstName?: string;
@@ -283,6 +295,12 @@ export interface SearchAppointmentsInput {
   endTime: number;
 }
 
+// ── Workflows / campaigns ───────────────────────────────────────────────
+export interface WorkflowContactInput {
+  contactId: string;
+  workflowId: string;
+}
+
 /**
  * Adapter boundary between our application and GoHighLevel. Implementations
  * must never log or return the raw access token.
@@ -347,6 +365,14 @@ export interface GhlClient {
   createAppointment(input: CreateAppointmentInput): Promise<GhlAppointment>;
   updateAppointment(input: UpdateAppointmentInput): Promise<GhlAppointment>;
   deleteAppointment(appointmentId: string): Promise<{ success: true }>;
+
+  // Workflows
+  listWorkflows(): Promise<GhlWorkflow[]>;
+  addContactToWorkflow(input: WorkflowContactInput): Promise<{ success: true }>;
+  removeContactFromWorkflow(input: WorkflowContactInput): Promise<{ success: true }>;
+
+  // Campaigns
+  listCampaigns(): Promise<GhlCampaign[]>;
 }
 
 export class GhlApiError extends Error {

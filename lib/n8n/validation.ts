@@ -214,6 +214,22 @@ export const payloadSchemas = {
     ignoreFreeSlotValidation: z.boolean().optional(),
   }),
   DELETE_APPOINTMENT: z.object({ appointmentId: z.string().min(1) }),
+
+  LIST_WORKFLOWS: z.object({}),
+  ADD_CONTACT_TO_WORKFLOW: z.object({
+    contactId: z.string().min(1),
+    contactLookupHint: z.string().optional(),
+    workflowId: z.string().min(1),
+    workflowNameHint: z.string().optional(),
+  }),
+  REMOVE_CONTACT_FROM_WORKFLOW: z.object({
+    contactId: z.string().min(1),
+    contactLookupHint: z.string().optional(),
+    workflowId: z.string().min(1),
+    workflowNameHint: z.string().optional(),
+  }),
+
+  LIST_CAMPAIGNS: z.object({}),
 } as const satisfies Record<AllowedAction, z.ZodTypeAny>;
 
 export function validatePayload(

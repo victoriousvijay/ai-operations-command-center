@@ -140,6 +140,14 @@ function describeAction(type: AllowedAction, p: Record<string, unknown>): string
         : `Reschedule appointment ${p.appointmentId}${p.startTime ? ` to ${p.startTime}` : ""}`;
     case "DELETE_APPOINTMENT":
       return `Delete appointment ${p.appointmentId} — destructive, needs confirmation`;
+    case "LIST_WORKFLOWS":
+      return "List all workflows";
+    case "ADD_CONTACT_TO_WORKFLOW":
+      return `Enroll ${who} in workflow "${p.workflowNameHint ?? p.workflowId}"`;
+    case "REMOVE_CONTACT_FROM_WORKFLOW":
+      return `Remove ${who} from workflow "${p.workflowNameHint ?? p.workflowId}"`;
+    case "LIST_CAMPAIGNS":
+      return "List all campaigns";
     default:
       return `${type}`;
   }

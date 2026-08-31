@@ -197,6 +197,16 @@ export function buildGhlRequest(
       // .../appointments/:id path create/get/update use — see
       // lib/ghl/client.ts's class doc comment for the live verification.
       return { method: "DELETE", path: `/calendars/events/${p.appointmentId}` };
+
+    case "LIST_WORKFLOWS":
+      return { method: "GET", path: `/workflows/?locationId=${locationId()}` };
+    case "ADD_CONTACT_TO_WORKFLOW":
+      return { method: "POST", path: `/contacts/${p.contactId}/workflow/${p.workflowId}`, body: {} };
+    case "REMOVE_CONTACT_FROM_WORKFLOW":
+      return { method: "DELETE", path: `/contacts/${p.contactId}/workflow/${p.workflowId}`, body: {} };
+
+    case "LIST_CAMPAIGNS":
+      return { method: "GET", path: `/campaigns/?locationId=${locationId()}` };
   }
 }
 

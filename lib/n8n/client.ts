@@ -240,6 +240,20 @@ export class MockN8nClient implements N8nClient {
         case "DELETE_APPOINTMENT":
           response = await ghl.deleteAppointment(payload.appointmentId as string);
           break;
+
+        case "LIST_WORKFLOWS":
+          response = { workflows: await ghl.listWorkflows() };
+          break;
+        case "ADD_CONTACT_TO_WORKFLOW":
+          response = await ghl.addContactToWorkflow(payload as never);
+          break;
+        case "REMOVE_CONTACT_FROM_WORKFLOW":
+          response = await ghl.removeContactFromWorkflow(payload as never);
+          break;
+
+        case "LIST_CAMPAIGNS":
+          response = { campaigns: await ghl.listCampaigns() };
+          break;
       }
 
       return { ok: true, workflowName, durationMs: Date.now() - startedAt, response };

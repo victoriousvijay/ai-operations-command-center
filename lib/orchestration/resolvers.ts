@@ -371,3 +371,31 @@ export async function resolveCalendarId(ghl: GhlClient, payload: Record<string, 
 
   return { payload: { ...rest, calendarId: matches[0]!.id } };
 }
+
+/**
+ * Turns a workflow name hint into a real GoHighLevel workflowId for
+ * ADD_CONTACT_TO_WORKFLOW / REMOVE_CONTACT_FROM_WORKFLOW — never invents
+ * one. Only resolves when workflowId isn't already present.
+ */
+export async function resolveWorkflowId(ghl: GhlClient, payload: Record<string, unknown>): Promise<Resolved> {
+  const { workflowNameHint, ...rest } = payload;
+  if (typeof rest.workflowId === "string" && rest.workflowId) {
+    return { payload: rest };
+  }
+
+  if (typeof workflowNameHint !== "string" || !workflowNameHint) {
+    return { payload: rest, error: "No workflowId was given and there is no workflow name to look it up by." };
+  }
+
+  const workflows = await ghl.listWorkflows();
+  const matches = matchByNameExactThenFuzzy(workflows, (w) => w.name, workflowNameHint);
+  if (matches.length === 0) {
+    const available = workflows.map((w) => w.name).join(", ") || "none configured";
+    return { payload: rest, error: `No GoHighLevel workflow found matching "${workflowNameHint}". Available workflows: ${available}.` };
+  }
+  if (matches.length > 1) {
+    return { payload: rest, error: `Multiple GoHighLevel workflows match "${workflowNameHint}": ${matches.map((w) => w.name).join(", ")}. Please be more specific.` };
+  }
+
+  return { payload: { ...rest, workflowId: matches[0]!.id } };
+}

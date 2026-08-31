@@ -13,6 +13,7 @@ import {
   resolveOpportunityId,
   resolvePipelineMutation,
   resolvePipelineStage,
+  resolveWorkflowId,
 } from "./resolvers";
 import {
   createAutomationAction,
@@ -64,6 +65,8 @@ const NEEDS_CONTACT_RESOLUTION = new Set<AllowedAction>([
   "SEARCH_CONVERSATIONS",
   "SEND_MESSAGE",
   "CREATE_APPOINTMENT",
+  "ADD_CONTACT_TO_WORKFLOW",
+  "REMOVE_CONTACT_FROM_WORKFLOW",
 ]);
 
 // Actions that operate on "the contact's opportunity" and may need it
@@ -88,6 +91,9 @@ const NEEDS_LEAD_ASSIGNMENT_RESOLUTION = new Set<AllowedAction>(["ASSIGN_LEAD"])
 
 // Actions that may carry a calendarNameHint instead of a real GHL calendarId.
 const NEEDS_CALENDAR_RESOLUTION = new Set<AllowedAction>(["CREATE_APPOINTMENT", "SEARCH_APPOINTMENTS"]);
+
+// Actions that may carry a workflowNameHint instead of a real GHL workflowId.
+const NEEDS_WORKFLOW_RESOLUTION = new Set<AllowedAction>(["ADD_CONTACT_TO_WORKFLOW", "REMOVE_CONTACT_FROM_WORKFLOW"]);
 
 /**
  * Resolves every name/email/pipeline-name hint on a payload to real
@@ -138,6 +144,12 @@ async function resolveReferences(
 
   if (NEEDS_CALENDAR_RESOLUTION.has(actionType)) {
     const resolved = await resolveCalendarId(ghl, current);
+    if (resolved.error) return resolved;
+    current = resolved.payload;
+  }
+
+  if (NEEDS_WORKFLOW_RESOLUTION.has(actionType)) {
+    const resolved = await resolveWorkflowId(ghl, current);
     if (resolved.error) return resolved;
     current = resolved.payload;
   }

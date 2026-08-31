@@ -16,6 +16,7 @@ import {
   resolveOpportunityId,
   resolvePipelineMutation,
   resolvePipelineStage,
+  resolveWorkflowId,
 } from "../lib/orchestration/resolvers";
 import { GhlApiError } from "../lib/ghl/types";
 import type { GhlClient, GhlOpportunity, GhlPipeline } from "../lib/ghl/types";
@@ -67,6 +68,10 @@ function fakeGhlClient(overrides: Partial<GhlClient>): GhlClient {
     createAppointment: notUsed,
     updateAppointment: notUsed,
     deleteAppointment: notUsed,
+    listWorkflows: notUsed,
+    addContactToWorkflow: notUsed,
+    removeContactFromWorkflow: notUsed,
+    listCampaigns: notUsed,
     ...overrides,
   };
 }
@@ -92,6 +97,7 @@ test("every allowed action has a mutation tier and a working GHL request builder
       appointmentId: "appt1",
       startTime: "2026-09-01T10:00:00.000Z",
       endTime: "2026-09-01T10:30:00.000Z",
+      workflowId: "wf1",
     });
     assert.ok(request.method, `${action} did not produce a method`);
     assert.ok(request.path, `${action} did not produce a path`);
@@ -397,4 +403,33 @@ test("resolveCalendarId errors clearly (lists real calendars) when no calendar m
   const result = await resolveCalendarId(ghl, { calendarNameHint: "Onboarding" });
   assert.match(result.error ?? "", /No GoHighLevel calendar found matching "Onboarding"/);
   assert.match(result.error ?? "", /Consultations, Demos/);
+});
+
+test("resolveWorkflowId resolves a workflow by name to a real workflowId", async () => {
+  const ghl = fakeGhlClient({
+    listWorkflows: async () => [{ id: "wf-real-1", name: "Lead Nurture Email Sequence" }],
+  });
+  const result = await resolveWorkflowId(ghl, { workflowNameHint: "Lead Nurture Email Sequence" });
+  assert.equal(result.error, undefined);
+  assert.equal(result.payload.workflowId, "wf-real-1");
+  assert.equal("workflowNameHint" in result.payload, false);
+});
+
+test("resolveWorkflowId leaves an already-known workflowId untouched", async () => {
+  const ghl = fakeGhlClient({ listWorkflows: notUsed });
+  const result = await resolveWorkflowId(ghl, { workflowId: "wf-already-known" });
+  assert.equal(result.error, undefined);
+  assert.equal(result.payload.workflowId, "wf-already-known");
+});
+
+test("resolveWorkflowId errors clearly (lists real workflows) when no workflow matches", async () => {
+  const ghl = fakeGhlClient({
+    listWorkflows: async () => [
+      { id: "wf-1", name: "AI Lead Qualification & Follow-Up" },
+      { id: "wf-2", name: "Lead Nurture Email Sequence" },
+    ],
+  });
+  const result = await resolveWorkflowId(ghl, { workflowNameHint: "Onboarding Sequence" });
+  assert.match(result.error ?? "", /No GoHighLevel workflow found matching "Onboarding Sequence"/);
+  assert.match(result.error ?? "", /AI Lead Qualification & Follow-Up, Lead Nurture Email Sequence/);
 });

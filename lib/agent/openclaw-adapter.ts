@@ -64,6 +64,12 @@ const ACTION_DESCRIPTIONS: Record<AllowedAction, string> = {
   CREATE_APPOINTMENT: `Book an appointment for a contact on a calendar, with an ISO 8601 startTime and endTime. If the calendar has no configured open hours, GoHighLevel rejects every slot as unavailable unless ignoreFreeSlotValidation is set to true — only set that when the user explicitly wants to bypass availability, otherwise let the real error surface so they know to configure the calendar's hours.${CONTACT_ID_NOTE}${CALENDAR_ID_NOTE}`,
   UPDATE_APPOINTMENT: "Reschedule an appointment (new startTime/endTime) or change its status — set appointmentStatus to \"cancelled\" to cancel without deleting the record. Requires a real appointmentId.",
   DELETE_APPOINTMENT: "Permanently delete an appointment record. Destructive — only propose this when explicitly asked; prefer UPDATE_APPOINTMENT with appointmentStatus \"cancelled\" for a normal cancellation.",
+
+  LIST_WORKFLOWS: "List every automation workflow configured in GoHighLevel, with real names, IDs, and draft/published status.",
+  ADD_CONTACT_TO_WORKFLOW: `Enroll a contact into an existing GoHighLevel workflow (e.g. a nurture sequence). This does NOT create or edit the workflow itself — only GHL's UI can do that.${CONTACT_ID_NOTE} If you don't know the real workflowId, set workflowNameHint to the workflow's name instead.`,
+  REMOVE_CONTACT_FROM_WORKFLOW: `Remove a contact from a workflow they're currently enrolled in, stopping their progress through it (not destructive — they can be re-enrolled).${CONTACT_ID_NOTE} If you don't know the real workflowId, set workflowNameHint instead.`,
+
+  LIST_CAMPAIGNS: "List every legacy campaign configured in GoHighLevel. Read-only — GHL's API has no way to create a campaign or enroll a contact in one; that's UI-only.",
 };
 
 function buildToolSchema() {
@@ -131,6 +137,8 @@ function buildToolSchema() {
           type: "boolean",
           description: "For CREATE_APPOINTMENT/UPDATE_APPOINTMENT: only set true when the user explicitly wants to bypass the calendar's configured availability. Leave false/unset by default so a real 'slot unavailable' error can surface.",
         },
+        workflowId: { type: "string", description: "The real GoHighLevel workflow ID, only if already known." },
+        workflowNameHint: { type: "string", description: "The workflow's name, when workflowId isn't already known." },
       },
       additionalProperties: true,
     },
