@@ -192,13 +192,15 @@ export class OpenClawAdapter implements AgentAdapter {
   async propose(userRequest: string): Promise<AgentProposal> {
     const response = await fetchWithRetry(`${this.gatewayUrl.replace(/\/$/, "")}/v1/responses`, {
       method: "POST",
-      // Real Gemini reasoning over this project's full 28-action tool
-      // schema routinely takes 10-30s, and compound multi-action requests
-      // (e.g. "move X's opportunity to Y and also add a note") take
-      // longer still — 30s was aborting legitimate, in-progress calls
-      // (confirmed live: successful calls up to ~20s, some aborting right
-      // at the old 30s boundary).
-      timeoutMs: 60_000,
+      // Real Gemini reasoning over this project's full tool schema (now
+      // 40+ actions after adding calendars/appointments/workflows)
+      // routinely takes 10-30s, and compound multi-action requests take
+      // longer still — 30s aborted legitimate calls, and even 60s has
+      // been observed to abort under load (confirmed live). 90s gives
+      // real headroom without hanging the UI indefinitely; the chat
+      // shows "This action can't be done — <reason>" either way rather
+      // than a raw timeout if it still happens.
+      timeoutMs: 90_000,
       retries: 0,
       headers: {
         Authorization: `Bearer ${this.token}`,
