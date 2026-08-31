@@ -218,6 +218,28 @@ export class MockN8nClient implements N8nClient {
         case "LIST_CALENDARS":
           response = { calendars: await ghl.listCalendars() };
           break;
+        case "CREATE_CALENDAR":
+          response = { calendar: await ghl.createCalendar(payload as { name: string }) };
+          break;
+        case "DELETE_CALENDAR":
+          response = await ghl.deleteCalendar(payload.calendarId as string);
+          break;
+
+        case "GET_APPOINTMENT":
+          response = { appointment: await ghl.getAppointment(payload.appointmentId as string) };
+          break;
+        case "SEARCH_APPOINTMENTS":
+          response = { appointments: await ghl.searchAppointments(payload as never) };
+          break;
+        case "CREATE_APPOINTMENT":
+          response = { appointment: await ghl.createAppointment(payload as never) };
+          break;
+        case "UPDATE_APPOINTMENT":
+          response = { appointment: await ghl.updateAppointment(payload as never) };
+          break;
+        case "DELETE_APPOINTMENT":
+          response = await ghl.deleteAppointment(payload.appointmentId as string);
+          break;
       }
 
       return { ok: true, workflowName, durationMs: Date.now() - startedAt, response };

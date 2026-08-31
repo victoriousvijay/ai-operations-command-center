@@ -156,6 +156,47 @@ export function buildGhlRequest(
 
     case "LIST_CALENDARS":
       return { method: "GET", path: `/calendars/?locationId=${locationId()}` };
+    case "CREATE_CALENDAR":
+      return { method: "POST", path: "/calendars/", body: { locationId: locationId(), name: p.name } };
+    case "DELETE_CALENDAR":
+      return { method: "DELETE", path: `/calendars/${p.calendarId}` };
+
+    case "GET_APPOINTMENT":
+      return { method: "GET", path: `/calendars/events/appointments/${p.appointmentId}` };
+    case "SEARCH_APPOINTMENTS": {
+      const params = new URLSearchParams({
+        locationId: locationId(),
+        calendarId: p.calendarId as string,
+        startTime: String(p.startTime),
+        endTime: String(p.endTime),
+      });
+      return { method: "GET", path: `/calendars/events?${params.toString()}` };
+    }
+    case "CREATE_APPOINTMENT":
+      return {
+        method: "POST",
+        path: "/calendars/events/appointments",
+        body: {
+          locationId: locationId(),
+          calendarId: p.calendarId,
+          contactId: p.contactId,
+          startTime: p.startTime,
+          endTime: p.endTime,
+          title: p.title,
+          ...(p.ignoreFreeSlotValidation ? { ignoreFreeSlotValidation: true } : {}),
+        },
+      };
+    case "UPDATE_APPOINTMENT":
+      return {
+        method: "PUT",
+        path: `/calendars/events/appointments/${p.appointmentId}`,
+        body: omit(p, ["appointmentId"]),
+      };
+    case "DELETE_APPOINTMENT":
+      // GHL's delete endpoint is /calendars/events/:id, not the
+      // .../appointments/:id path create/get/update use — see
+      // lib/ghl/client.ts's class doc comment for the live verification.
+      return { method: "DELETE", path: `/calendars/events/${p.appointmentId}` };
   }
 }
 

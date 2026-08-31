@@ -342,3 +342,32 @@ export async function resolveLeadAssignment(ghl: GhlClient, payload: Record<stri
 
   return { payload: { ...rest, assignedToUserId: matches[0]!.id } };
 }
+
+/**
+ * Turns a calendar name hint into a real GoHighLevel calendarId for
+ * appointment actions (create/search) — never invents one. Only resolves
+ * when calendarId isn't already present, so an already-known ID (e.g.
+ * from a prior LIST_CALENDARS lookup) is never overridden.
+ */
+export async function resolveCalendarId(ghl: GhlClient, payload: Record<string, unknown>): Promise<Resolved> {
+  const { calendarNameHint, ...rest } = payload;
+  if (typeof rest.calendarId === "string" && rest.calendarId) {
+    return { payload: rest };
+  }
+
+  if (typeof calendarNameHint !== "string" || !calendarNameHint) {
+    return { payload: rest, error: "No calendarId was given and there is no calendar name to look it up by." };
+  }
+
+  const calendars = await ghl.listCalendars();
+  const matches = matchByNameExactThenFuzzy(calendars, (c) => c.name, calendarNameHint);
+  if (matches.length === 0) {
+    const available = calendars.map((c) => c.name).join(", ") || "none configured";
+    return { payload: rest, error: `No GoHighLevel calendar found matching "${calendarNameHint}". Available calendars: ${available}.` };
+  }
+  if (matches.length > 1) {
+    return { payload: rest, error: `Multiple GoHighLevel calendars match "${calendarNameHint}": ${matches.map((c) => c.name).join(", ")}. Please be more specific.` };
+  }
+
+  return { payload: { ...rest, calendarId: matches[0]!.id } };
+}

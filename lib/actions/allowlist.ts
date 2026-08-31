@@ -72,9 +72,20 @@ export const ALLOWED_ACTIONS = [
   "SEARCH_CONVERSATIONS",
   "GET_CONVERSATION",
   "SEND_MESSAGE",
-  // Calendars (read-only — no calendar exists in this location to test
-  // appointment mutations against yet; see README.md)
+  // Calendars
   "LIST_CALENDARS",
+  "CREATE_CALENDAR",
+  "DELETE_CALENDAR",
+  // Appointments — full create/reschedule/cancel/delete verified live
+  // against a real, temporary calendar (see lib/ghl/client.ts's class doc
+  // comment for the one real API quirk: POST requires
+  // ignoreFreeSlotValidation:true unless the calendar has real open hours
+  // configured, or GHL rejects every slot as unavailable).
+  "SEARCH_APPOINTMENTS",
+  "GET_APPOINTMENT",
+  "CREATE_APPOINTMENT",
+  "UPDATE_APPOINTMENT",
+  "DELETE_APPOINTMENT",
 ] as const;
 
 export type AllowedAction = (typeof ALLOWED_ACTIONS)[number];
@@ -140,4 +151,16 @@ export const MUTATION_TIER: Record<AllowedAction, "readonly" | "mutating" | "des
   SEND_MESSAGE: "destructive",
 
   LIST_CALENDARS: "readonly",
+  CREATE_CALENDAR: "mutating",
+  // Removing a calendar removes every appointment booked on it too.
+  DELETE_CALENDAR: "destructive",
+
+  SEARCH_APPOINTMENTS: "readonly",
+  GET_APPOINTMENT: "readonly",
+  CREATE_APPOINTMENT: "mutating",
+  // Covers both reschedule (new start/end time) and cancel
+  // (appointmentStatus: "cancelled") — neither erases the record, unlike
+  // DELETE_APPOINTMENT, so this stays "mutating" not "destructive".
+  UPDATE_APPOINTMENT: "mutating",
+  DELETE_APPOINTMENT: "destructive",
 };

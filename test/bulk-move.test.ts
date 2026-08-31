@@ -52,6 +52,13 @@ function fakeGhlClient(overrides: Partial<GhlClient>): GhlClient {
     getConversation: notUsed,
     sendMessage: notUsed,
     listCalendars: notUsed,
+    createCalendar: notUsed,
+    deleteCalendar: notUsed,
+    getAppointment: notUsed,
+    searchAppointments: notUsed,
+    createAppointment: notUsed,
+    updateAppointment: notUsed,
+    deleteAppointment: notUsed,
     ...overrides,
   };
 }

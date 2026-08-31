@@ -53,6 +53,13 @@ export const WORKFLOW_BY_ACTION: Record<AllowedAction, string> = {
   GET_CONVERSATION: "ghl-contact-workflow",
   SEND_MESSAGE: "ghl-contact-workflow",
   LIST_CALENDARS: "ghl-contact-workflow",
+  CREATE_CALENDAR: "ghl-contact-workflow",
+  DELETE_CALENDAR: "ghl-contact-workflow",
+  SEARCH_APPOINTMENTS: "ghl-contact-workflow",
+  GET_APPOINTMENT: "ghl-contact-workflow",
+  CREATE_APPOINTMENT: "ghl-contact-workflow",
+  UPDATE_APPOINTMENT: "ghl-contact-workflow",
+  DELETE_APPOINTMENT: "ghl-contact-workflow",
 
   SEARCH_OPPORTUNITIES: "ghl-opportunity-workflow",
   GET_OPPORTUNITY: "ghl-opportunity-workflow",

@@ -57,6 +57,13 @@ function fakeGhlClient(contacts: GhlContact[]): GhlClient {
     getConversation: notUsed,
     sendMessage: notUsed,
     listCalendars: notUsed,
+    createCalendar: notUsed,
+    deleteCalendar: notUsed,
+    getAppointment: notUsed,
+    searchAppointments: notUsed,
+    createAppointment: notUsed,
+    updateAppointment: notUsed,
+    deleteAppointment: notUsed,
   };
 }
 

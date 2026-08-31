@@ -181,6 +181,39 @@ export const payloadSchemas = {
   }),
 
   LIST_CALENDARS: z.object({}),
+  CREATE_CALENDAR: z.object({ name: z.string().min(1) }),
+  DELETE_CALENDAR: z.object({ calendarId: z.string().min(1) }),
+
+  SEARCH_APPOINTMENTS: z.object({
+    calendarId: z.string().min(1),
+    calendarNameHint: z.string().optional(),
+    // Accepts either a number or a numeric string — the AI adapter's tool
+    // schema declares these as strings (JSON tool-call arguments are
+    // always strings/JSON-primitives), so this coerces rather than
+    // rejecting a perfectly valid "1750000000000".
+    startTime: z.coerce.number(),
+    endTime: z.coerce.number(),
+  }),
+  GET_APPOINTMENT: z.object({ appointmentId: z.string().min(1) }),
+  CREATE_APPOINTMENT: z.object({
+    calendarId: z.string().min(1),
+    calendarNameHint: z.string().optional(),
+    contactId: z.string().min(1),
+    contactLookupHint: z.string().optional(),
+    startTime: z.string().min(1),
+    endTime: z.string().min(1),
+    title: z.string().optional(),
+    ignoreFreeSlotValidation: z.boolean().optional(),
+  }),
+  UPDATE_APPOINTMENT: z.object({
+    appointmentId: z.string().min(1),
+    startTime: z.string().optional(),
+    endTime: z.string().optional(),
+    title: z.string().optional(),
+    appointmentStatus: z.enum(["confirmed", "cancelled", "showed", "noshow", "invalid"]).optional(),
+    ignoreFreeSlotValidation: z.boolean().optional(),
+  }),
+  DELETE_APPOINTMENT: z.object({ appointmentId: z.string().min(1) }),
 } as const satisfies Record<AllowedAction, z.ZodTypeAny>;
 
 export function validatePayload(

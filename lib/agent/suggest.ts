@@ -124,6 +124,22 @@ function describeAction(type: AllowedAction, p: Record<string, unknown>): string
       return `Send a ${p.type ?? "SMS"} to ${who}: "${typeof p.message === "string" ? p.message.slice(0, 60) : ""}" — destructive, needs confirmation`;
     case "LIST_CALENDARS":
       return "List all calendars";
+    case "CREATE_CALENDAR":
+      return `Create a new calendar "${p.name}"`;
+    case "DELETE_CALENDAR":
+      return `Delete calendar "${p.calendarNameHint ?? p.calendarId}" — destructive, needs confirmation`;
+    case "SEARCH_APPOINTMENTS":
+      return `List appointments on "${p.calendarNameHint ?? p.calendarId}"`;
+    case "GET_APPOINTMENT":
+      return `Look up appointment ${p.appointmentId}`;
+    case "CREATE_APPOINTMENT":
+      return `Book an appointment for ${who} on "${p.calendarNameHint ?? p.calendarId}"${p.startTime ? ` at ${p.startTime}` : ""}`;
+    case "UPDATE_APPOINTMENT":
+      return p.appointmentStatus === "cancelled"
+        ? `Cancel appointment ${p.appointmentId}`
+        : `Reschedule appointment ${p.appointmentId}${p.startTime ? ` to ${p.startTime}` : ""}`;
+    case "DELETE_APPOINTMENT":
+      return `Delete appointment ${p.appointmentId} — destructive, needs confirmation`;
     default:
       return `${type}`;
   }

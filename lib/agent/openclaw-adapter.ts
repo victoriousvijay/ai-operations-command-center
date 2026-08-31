@@ -10,6 +10,8 @@ const OPPORTUNITY_ID_NOTE =
   " If you don't know the real opportunityId, leave it empty — set contactLookupHint (or contactId) instead and it will be resolved to that contact's one opportunity. Never invent an opportunityId.";
 const STAGE_NOTE =
   " If you only know the stage/pipeline by name (e.g. \"Qualified\", \"AI Qualified\"), leave pipelineStageId/pipelineId empty and set stageNameHint (and pipelineNameHint if the user named a specific pipeline) instead — real IDs will be looked up. Never invent a pipelineStageId.";
+const CALENDAR_ID_NOTE =
+  " If you don't know the real calendarId, leave it empty and set calendarNameHint to the calendar's name instead — it will be resolved to a real calendar before this runs. Never invent a calendarId.";
 
 const ACTION_DESCRIPTIONS: Record<AllowedAction, string> = {
   SEARCH_CONTACTS: "Search for GoHighLevel contacts by name, email, or phone. Use this when the user asks to find/look up/list contacts, or when you need to disambiguate before another action.",
@@ -54,6 +56,14 @@ const ACTION_DESCRIPTIONS: Record<AllowedAction, string> = {
   SEND_MESSAGE: `Send a real SMS or email message to a contact. High-impact — only propose this when the user explicitly asks to send/message someone, and always double-check the message text. For type Email, also set a subject.${CONTACT_ID_NOTE}`,
 
   LIST_CALENDARS: "List the calendars configured for this GoHighLevel location.",
+  CREATE_CALENDAR: "Create a new calendar (name only). Note: a freshly created calendar has no open hours configured, so appointments booked on it need ignoreFreeSlotValidation:true until real business hours are set up in GoHighLevel.",
+  DELETE_CALENDAR: "Permanently delete a calendar and everything booked on it. Destructive — only propose this when explicitly asked. Set calendarNameHint to identify it if calendarId isn't known.",
+
+  SEARCH_APPOINTMENTS: `List appointments on one calendar within a time range (startTime/endTime as epoch milliseconds).${CALENDAR_ID_NOTE}`,
+  GET_APPOINTMENT: "Look up a single appointment by its real appointmentId.",
+  CREATE_APPOINTMENT: `Book an appointment for a contact on a calendar, with an ISO 8601 startTime and endTime. If the calendar has no configured open hours, GoHighLevel rejects every slot as unavailable unless ignoreFreeSlotValidation is set to true — only set that when the user explicitly wants to bypass availability, otherwise let the real error surface so they know to configure the calendar's hours.${CONTACT_ID_NOTE}${CALENDAR_ID_NOTE}`,
+  UPDATE_APPOINTMENT: "Reschedule an appointment (new startTime/endTime) or change its status — set appointmentStatus to \"cancelled\" to cancel without deleting the record. Requires a real appointmentId.",
+  DELETE_APPOINTMENT: "Permanently delete an appointment record. Destructive — only propose this when explicitly asked; prefer UPDATE_APPOINTMENT with appointmentStatus \"cancelled\" for a normal cancellation.",
 };
 
 function buildToolSchema() {
@@ -101,6 +111,26 @@ function buildToolSchema() {
         message: { type: "string", description: "The message body. For SEND_MESSAGE with type Email, plain text is fine — it's wrapped as the email body." },
         type: { type: "string", enum: ["SMS", "Email"] },
         subject: { type: "string", description: "For SEND_MESSAGE with type Email: the email subject line." },
+        calendarId: { type: "string", description: "The real GoHighLevel calendar ID, only if already known." },
+        calendarNameHint: { type: "string", description: "The calendar's name, when calendarId isn't already known." },
+        appointmentId: { type: "string", description: "The real GoHighLevel appointment ID, only if already known." },
+        startTime: {
+          type: "string",
+          description: "For CREATE_APPOINTMENT/UPDATE_APPOINTMENT: ISO 8601 date-time. For SEARCH_APPOINTMENTS: epoch milliseconds as a string.",
+        },
+        endTime: {
+          type: "string",
+          description: "For CREATE_APPOINTMENT/UPDATE_APPOINTMENT: ISO 8601 date-time. For SEARCH_APPOINTMENTS: epoch milliseconds as a string.",
+        },
+        appointmentStatus: {
+          type: "string",
+          enum: ["confirmed", "cancelled", "showed", "noshow", "invalid"],
+          description: "For UPDATE_APPOINTMENT: set to 'cancelled' to cancel without deleting the record.",
+        },
+        ignoreFreeSlotValidation: {
+          type: "boolean",
+          description: "For CREATE_APPOINTMENT/UPDATE_APPOINTMENT: only set true when the user explicitly wants to bypass the calendar's configured availability. Leave false/unset by default so a real 'slot unavailable' error can surface.",
+        },
       },
       additionalProperties: true,
     },

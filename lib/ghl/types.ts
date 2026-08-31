@@ -85,6 +85,16 @@ export interface GhlCalendar {
   name: string;
 }
 
+export interface GhlAppointment {
+  id: string;
+  calendarId: string;
+  contactId: string;
+  title?: string;
+  startTime?: string;
+  endTime?: string;
+  appointmentStatus?: "confirmed" | "cancelled" | "showed" | "noshow" | "invalid";
+}
+
 // ── Contacts ────────────────────────────────────────────────────────────
 export interface CreateContactInput {
   firstName?: string;
@@ -233,6 +243,46 @@ export interface SendMessageInput {
   subject?: string;
 }
 
+// ── Calendars / appointments ───────────────────────────────────────────
+export interface CreateCalendarInput {
+  name: string;
+}
+
+/**
+ * `ignoreFreeSlotValidation` is required (verified live) unless the target
+ * calendar has real open hours configured in GoHighLevel — otherwise every
+ * slot is rejected with "The slot you have selected is no longer
+ * available", even for a calendar with zero existing bookings. Defaults to
+ * false here: this app should not silently bypass a calendar's real
+ * business hours. When a request errors with that exact message, the
+ * caller (or the person reading the error) knows to either configure open
+ * hours for that calendar in GHL, or explicitly ask for the override.
+ */
+export interface CreateAppointmentInput {
+  calendarId: string;
+  contactId: string;
+  startTime: string;
+  endTime: string;
+  title?: string;
+  ignoreFreeSlotValidation?: boolean;
+}
+
+export interface UpdateAppointmentInput {
+  appointmentId: string;
+  startTime?: string;
+  endTime?: string;
+  title?: string;
+  appointmentStatus?: "confirmed" | "cancelled" | "showed" | "noshow" | "invalid";
+  ignoreFreeSlotValidation?: boolean;
+}
+
+export interface SearchAppointmentsInput {
+  calendarId: string;
+  /** Epoch milliseconds — GHL's real /calendars/events contract, verified live. */
+  startTime: number;
+  endTime: number;
+}
+
 /**
  * Adapter boundary between our application and GoHighLevel. Implementations
  * must never log or return the raw access token.
@@ -288,6 +338,15 @@ export interface GhlClient {
 
   // Calendars
   listCalendars(): Promise<GhlCalendar[]>;
+  createCalendar(input: CreateCalendarInput): Promise<GhlCalendar>;
+  deleteCalendar(calendarId: string): Promise<{ success: true }>;
+
+  // Appointments
+  getAppointment(appointmentId: string): Promise<GhlAppointment>;
+  searchAppointments(input: SearchAppointmentsInput): Promise<GhlAppointment[]>;
+  createAppointment(input: CreateAppointmentInput): Promise<GhlAppointment>;
+  updateAppointment(input: UpdateAppointmentInput): Promise<GhlAppointment>;
+  deleteAppointment(appointmentId: string): Promise<{ success: true }>;
 }
 
 export class GhlApiError extends Error {

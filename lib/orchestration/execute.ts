@@ -7,6 +7,7 @@ import { getN8nClient } from "@/lib/n8n";
 import { attachGhlRequest } from "@/lib/n8n/client";
 import {
   matchByNameExactThenFuzzy,
+  resolveCalendarId,
   resolveContactId,
   resolveLeadAssignment,
   resolveOpportunityId,
@@ -62,6 +63,7 @@ const NEEDS_CONTACT_RESOLUTION = new Set<AllowedAction>([
   "ADD_NOTE",
   "SEARCH_CONVERSATIONS",
   "SEND_MESSAGE",
+  "CREATE_APPOINTMENT",
 ]);
 
 // Actions that operate on "the contact's opportunity" and may need it
@@ -83,6 +85,9 @@ const NEEDS_PIPELINE_MUTATION_RESOLUTION = new Set<AllowedAction>([
 
 // Actions that may carry an assignedToNameHint instead of a real GHL user ID.
 const NEEDS_LEAD_ASSIGNMENT_RESOLUTION = new Set<AllowedAction>(["ASSIGN_LEAD"]);
+
+// Actions that may carry a calendarNameHint instead of a real GHL calendarId.
+const NEEDS_CALENDAR_RESOLUTION = new Set<AllowedAction>(["CREATE_APPOINTMENT", "SEARCH_APPOINTMENTS"]);
 
 /**
  * Resolves every name/email/pipeline-name hint on a payload to real
@@ -127,6 +132,12 @@ async function resolveReferences(
 
   if (NEEDS_LEAD_ASSIGNMENT_RESOLUTION.has(actionType)) {
     const resolved = await resolveLeadAssignment(ghl, current);
+    if (resolved.error) return resolved;
+    current = resolved.payload;
+  }
+
+  if (NEEDS_CALENDAR_RESOLUTION.has(actionType)) {
+    const resolved = await resolveCalendarId(ghl, current);
     if (resolved.error) return resolved;
     current = resolved.payload;
   }

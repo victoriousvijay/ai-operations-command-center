@@ -10,7 +10,13 @@ import assert from "node:assert/strict";
 import { ALLOWED_ACTIONS, MUTATION_TIER } from "../lib/actions/allowlist";
 import { buildGhlRequest } from "../lib/actions/registry";
 import { MockN8nClient, attachGhlRequest } from "../lib/n8n/client";
-import { resolveLeadAssignment, resolveOpportunityId, resolvePipelineMutation, resolvePipelineStage } from "../lib/orchestration/resolvers";
+import {
+  resolveCalendarId,
+  resolveLeadAssignment,
+  resolveOpportunityId,
+  resolvePipelineMutation,
+  resolvePipelineStage,
+} from "../lib/orchestration/resolvers";
 import { GhlApiError } from "../lib/ghl/types";
 import type { GhlClient, GhlOpportunity, GhlPipeline } from "../lib/ghl/types";
 
@@ -54,6 +60,13 @@ function fakeGhlClient(overrides: Partial<GhlClient>): GhlClient {
     getConversation: notUsed,
     sendMessage: notUsed,
     listCalendars: notUsed,
+    createCalendar: notUsed,
+    deleteCalendar: notUsed,
+    getAppointment: notUsed,
+    searchAppointments: notUsed,
+    createAppointment: notUsed,
+    updateAppointment: notUsed,
+    deleteAppointment: notUsed,
     ...overrides,
   };
 }
@@ -75,6 +88,10 @@ test("every allowed action has a mutation tier and a working GHL request builder
       pipelineId: "p1",
       name: "Solar Leads",
       stages: [{ id: "s1", name: "New Lead", position: 0 }],
+      calendarId: "cal1",
+      appointmentId: "appt1",
+      startTime: "2026-09-01T10:00:00.000Z",
+      endTime: "2026-09-01T10:30:00.000Z",
     });
     assert.ok(request.method, `${action} did not produce a method`);
     assert.ok(request.path, `${action} did not produce a path`);
@@ -354,4 +371,30 @@ test("resolveLeadAssignment gives a specific, actionable error when the Users sc
   const result = await resolveLeadAssignment(ghl, { contactId: "c1", assignedToNameHint: "Sales Team" });
   assert.match(result.error ?? "", /Users.*scope/i);
   assert.match(result.error ?? "", /Sales Team/);
+});
+
+test("resolveCalendarId resolves a calendar by name to a real calendarId", async () => {
+  const ghl = fakeGhlClient({
+    listCalendars: async () => [{ id: "cal-real-1", name: "Consultations" }],
+  });
+  const result = await resolveCalendarId(ghl, { calendarNameHint: "Consultations" });
+  assert.equal(result.error, undefined);
+  assert.equal(result.payload.calendarId, "cal-real-1");
+  assert.equal("calendarNameHint" in result.payload, false);
+});
+
+test("resolveCalendarId leaves an already-known calendarId untouched", async () => {
+  const ghl = fakeGhlClient({ listCalendars: notUsed });
+  const result = await resolveCalendarId(ghl, { calendarId: "cal-already-known" });
+  assert.equal(result.error, undefined);
+  assert.equal(result.payload.calendarId, "cal-already-known");
+});
+
+test("resolveCalendarId errors clearly (lists real calendars) when no calendar matches", async () => {
+  const ghl = fakeGhlClient({
+    listCalendars: async () => [{ id: "cal-1", name: "Consultations" }, { id: "cal-2", name: "Demos" }],
+  });
+  const result = await resolveCalendarId(ghl, { calendarNameHint: "Onboarding" });
+  assert.match(result.error ?? "", /No GoHighLevel calendar found matching "Onboarding"/);
+  assert.match(result.error ?? "", /Consultations, Demos/);
 });

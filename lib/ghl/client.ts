@@ -4,12 +4,15 @@ import {
   GhlApiError,
   type AddNoteInput,
   type AssignLeadInput,
+  type CreateAppointmentInput,
+  type CreateCalendarInput,
   type CreateContactInput,
   type CreateCustomFieldInput,
   type CreateOpportunityInput,
   type CreatePipelineInput,
   type CreateTaskInput,
   type ContactTagInput,
+  type GhlAppointment,
   type GhlCalendar,
   type GhlClient,
   type GhlContact,
@@ -20,9 +23,11 @@ import {
   type GhlPipeline,
   type GhlTask,
   type GhlUser,
+  type SearchAppointmentsInput,
   type SearchContactsInput,
   type SearchOpportunitiesInput,
   type SendMessageInput,
+  type UpdateAppointmentInput,
   type UpdateContactInput,
   type UpdateCustomFieldInput,
   type UpdateOpportunityInput,
@@ -77,9 +82,23 @@ import {
  *     content error), but `type: "Email"` silently rejects `message` with
  *     422 CONVERSATIONS_MSG_NO_CONTENT and requires `html` + `subject`
  *     instead. Fixed below to branch on type.
- *   - Calendars: GET /calendars/?locationId=... verified live (returns an
- *     empty list — this location has no calendar configured yet, so
- *     appointment scheduling actions are out of scope until one exists).
+ *   - Calendars: GET/POST/DELETE /calendars(/:id) — verified live with a
+ *     real create → delete round-trip (`ZZ Test Calendar Delete Me`).
+ *   - Appointments: POST /calendars/events/appointments to create,
+ *     GET/PUT /calendars/events/appointments/:id to read/update, DELETE
+ *     /calendars/events/:id to delete (a different path than
+ *     create/get/update — verified live, returns {"succeeded":true}), GET
+ *     /calendars/events for search — verified live with a real create →
+ *     reschedule → cancel → delete round-trip. One real API quirk: a
+ *     freshly created calendar
+ *     has no open hours configured (`openHours: {}`), so POST always
+ *     rejects every slot with "The slot you have selected is no longer
+ *     available" UNLESS `ignoreFreeSlotValidation: true` is sent — this
+ *     client passes that through verbatim rather than forcing it, so a
+ *     calendar with real configured hours still gets real validation.
+ *     Also: /calendars/events requires calendarId, userId, or groupId —
+ *     there is no way to search appointments by contactId alone (confirmed
+ *     live via a 422 "property contactId should not exist").
  *   - Lead assignment: PUT /contacts/:id with {"assignedTo": "<userId>"} is
  *     a real, processed field, confirmed live: a bogus user ID returns a
  *     404 (GHL tried and failed to resolve it), not a 422 validation
@@ -411,13 +430,89 @@ export class RealGhlClient implements GhlClient {
     return data;
   }
 
-  // ── Calendars (read-only — see class doc comment) ────────────────────
+  // ── Calendars ─────────────────────────────────────────────────────────
   async listCalendars(): Promise<GhlCalendar[]> {
     const locationId = this.requireLocationId("calendar listing");
     const data = await this.request<{ calendars: GhlCalendar[] }>(
       `/calendars/?locationId=${locationId}`,
     );
     return data.calendars ?? [];
+  }
+
+  async createCalendar(input: CreateCalendarInput): Promise<GhlCalendar> {
+    const locationId = this.requireLocationId("calendar creation");
+    const data = await this.request<{ calendar: GhlCalendar }>(`/calendars/`, {
+      method: "POST",
+      body: JSON.stringify({ locationId, name: input.name }),
+    });
+    return data.calendar;
+  }
+
+  async deleteCalendar(calendarId: string): Promise<{ success: true }> {
+    await this.request(`/calendars/${calendarId}`, { method: "DELETE" });
+    return { success: true };
+  }
+
+  // ── Appointments ──────────────────────────────────────────────────────
+  async getAppointment(appointmentId: string): Promise<GhlAppointment> {
+    const data = await this.request<{ appointment: GhlAppointment }>(
+      `/calendars/events/appointments/${appointmentId}`,
+    );
+    return data.appointment;
+  }
+
+  async searchAppointments(input: SearchAppointmentsInput): Promise<GhlAppointment[]> {
+    const locationId = this.requireLocationId("appointment search");
+    const params = new URLSearchParams({
+      locationId,
+      calendarId: input.calendarId,
+      startTime: String(input.startTime),
+      endTime: String(input.endTime),
+    });
+    const data = await this.request<{ events: GhlAppointment[] }>(`/calendars/events?${params.toString()}`);
+    return data.events ?? [];
+  }
+
+  async createAppointment(input: CreateAppointmentInput): Promise<GhlAppointment> {
+    const locationId = this.requireLocationId("appointment creation");
+    const data = await this.request<GhlAppointment>(`/calendars/events/appointments`, {
+      method: "POST",
+      body: JSON.stringify({
+        locationId,
+        calendarId: input.calendarId,
+        contactId: input.contactId,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        title: input.title,
+        ...(input.ignoreFreeSlotValidation ? { ignoreFreeSlotValidation: true } : {}),
+      }),
+    });
+    return data;
+  }
+
+  async updateAppointment(input: UpdateAppointmentInput): Promise<GhlAppointment> {
+    const data = await this.request<GhlAppointment>(
+      `/calendars/events/appointments/${input.appointmentId}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          ...(input.startTime ? { startTime: input.startTime } : {}),
+          ...(input.endTime ? { endTime: input.endTime } : {}),
+          ...(input.title ? { title: input.title } : {}),
+          ...(input.appointmentStatus ? { appointmentStatus: input.appointmentStatus } : {}),
+          ...(input.ignoreFreeSlotValidation ? { ignoreFreeSlotValidation: true } : {}),
+        }),
+      },
+    );
+    return data;
+  }
+
+  // GHL's DELETE for an appointment is at /calendars/events/:id (not the
+  // /calendars/events/appointments/:id path create/get/update use) —
+  // verified live, returns {"succeeded":true}.
+  async deleteAppointment(appointmentId: string): Promise<{ success: true }> {
+    await this.request(`/calendars/events/${appointmentId}`, { method: "DELETE" });
+    return { success: true };
   }
 }
 
@@ -696,5 +791,49 @@ export class MockGhlClient implements GhlClient {
 
   async listCalendars(): Promise<GhlCalendar[]> {
     return [{ id: "mock-calendar-1", name: "Mock Calendar" }];
+  }
+
+  async createCalendar(input: CreateCalendarInput): Promise<GhlCalendar> {
+    return { id: `mock-calendar-${Date.now()}`, name: input.name };
+  }
+
+  async deleteCalendar(): Promise<{ success: true }> {
+    return { success: true };
+  }
+
+  async getAppointment(appointmentId: string): Promise<GhlAppointment> {
+    return { id: appointmentId, calendarId: "mock-calendar-1", contactId: "mock-contact-unknown", appointmentStatus: "confirmed" };
+  }
+
+  async searchAppointments(input: SearchAppointmentsInput): Promise<GhlAppointment[]> {
+    return [{ id: "mock-appointment-1", calendarId: input.calendarId, contactId: "mock-contact-unknown", appointmentStatus: "confirmed" }];
+  }
+
+  async createAppointment(input: CreateAppointmentInput): Promise<GhlAppointment> {
+    return {
+      id: `mock-appointment-${Date.now()}`,
+      calendarId: input.calendarId,
+      contactId: input.contactId,
+      title: input.title,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      appointmentStatus: "confirmed",
+    };
+  }
+
+  async updateAppointment(input: UpdateAppointmentInput): Promise<GhlAppointment> {
+    return {
+      id: input.appointmentId,
+      calendarId: "mock-calendar-1",
+      contactId: "mock-contact-unknown",
+      title: input.title,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      appointmentStatus: input.appointmentStatus ?? "confirmed",
+    };
+  }
+
+  async deleteAppointment(): Promise<{ success: true }> {
+    return { success: true };
   }
 }
