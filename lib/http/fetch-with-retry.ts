@@ -35,7 +35,10 @@ export async function fetchWithRetry(
       return response;
     } catch (error) {
       clearTimeout(timeout);
-      lastError = error;
+      lastError =
+        error instanceof Error && error.name === "AbortError"
+          ? new Error(`Request to ${url} did not respond within ${timeoutMs}ms and was aborted.`)
+          : error;
       if (attempt >= retries) {
         break;
       }
