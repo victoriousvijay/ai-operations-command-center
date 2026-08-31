@@ -119,6 +119,17 @@ deterministic mock parser in dev mode) maps intent to one of the actions
 below. Multi-action requests in one sentence are supported ("find X, move
 their opportunity, and add a tag" becomes three actions).
 
+If you're not sure your phrasing will parse the way you mean, click
+**"Suggest Commands"** instead of "Execute Request" — it asks the agent to
+turn your sentence into one or more candidate structured commands
+(`POST /api/suggest`, `lib/agent/suggest.ts`) and shows them as a plain-English
+picker; nothing runs until you click one. With a real OpenClaw Gateway, the
+request is explicitly framed so genuinely ambiguous input surfaces multiple
+candidates instead of silently guessing one — this reuses the exact same
+verified tool-calling contract every other agent call uses, not a new API.
+The deterministic mock parser has no real understanding, so it returns
+whatever single interpretation it finds (or none) unmodified.
+
 | You say... | Maps to |
 |---|---|
 | "Find Rahul Sharma" / "Search contacts for rahul@example.com" | `SEARCH_CONTACTS` |

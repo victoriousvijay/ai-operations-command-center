@@ -26,6 +26,18 @@ interface PlannedActionView {
   message?: string;
 }
 
+interface CommandSuggestionView {
+  label: string;
+  type: string;
+  payload: Record<string, unknown>;
+}
+
+interface SuggestResponse {
+  ok: boolean;
+  suggestions?: CommandSuggestionView[];
+  error?: { type: string; message: string };
+}
+
 interface FileParseResponse {
   ok: boolean;
   fileName?: string;
@@ -86,6 +98,11 @@ export function Dashboard() {
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<ExecuteResponse | null>(null);
   const [confirming, setConfirming] = useState(false);
+
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState<CommandSuggestionView[] | null>(null);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [selectingSuggestion, setSelectingSuggestion] = useState(false);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -155,6 +172,65 @@ export function Dashboard() {
       });
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  /**
+   * "Refine my sentence into a command": asks the agent to turn loose
+   * English into one or more candidate structured actions (never
+   * executes any of them) so the user can pick the one they actually
+   * meant before anything touches GoHighLevel.
+   */
+  async function handleSuggest() {
+    if (!userRequest.trim() || suggesting) return;
+    setSuggesting(true);
+    setSuggestions(null);
+    setSuggestError(null);
+    setLastResult(null);
+    try {
+      const response = await fetch("/api/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userRequest }),
+      });
+      const json = (await response.json()) as SuggestResponse;
+      if (!json.ok) {
+        setSuggestError(json.error?.message ?? "Could not interpret this request.");
+      } else if (!json.suggestions || json.suggestions.length === 0) {
+        setSuggestError("No matching commands found — try rephrasing, or name the action and person more explicitly.");
+      } else {
+        setSuggestions(json.suggestions);
+      }
+    } catch (error) {
+      setSuggestError(error instanceof Error ? error.message : "Request failed.");
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  async function handleSelectSuggestion(suggestion: CommandSuggestionView) {
+    if (selectingSuggestion) return;
+    setSelectingSuggestion(true);
+    try {
+      const response = await fetch("/api/files/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          intent: userRequest,
+          actions: [{ type: suggestion.type, payload: suggestion.payload }],
+        }),
+      });
+      const json = (await response.json()) as ExecuteResponse;
+      setLastResult(json);
+      setSuggestions(null);
+      await loadDashboardData();
+    } catch (error) {
+      setLastResult({
+        ok: false,
+        error: { type: "network_error", message: error instanceof Error ? error.message : "Request failed." },
+      });
+    } finally {
+      setSelectingSuggestion(false);
     }
   }
 
@@ -282,7 +358,15 @@ export function Dashboard() {
           placeholder="Real GHL contact ID (optional — overrides the agent's guess so this hits real data)"
           className="mt-2 w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-xs text-neutral-300 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
         />
-        <div className="mt-3 flex items-center justify-between">
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={handleSuggest}
+            disabled={suggesting || !userRequest.trim()}
+            className="rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2 text-sm font-medium text-neutral-100 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+            title="Turn this sentence into one or more candidate commands to pick from — nothing runs until you choose one."
+          >
+            {suggesting ? "Thinking…" : "Suggest Commands"}
+          </button>
           <button
             onClick={handleExecute}
             disabled={submitting || !userRequest.trim()}
@@ -291,6 +375,40 @@ export function Dashboard() {
             {submitting ? "Executing…" : "Execute Request"}
           </button>
         </div>
+
+        {suggestError && (
+          <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+            {suggestError}
+          </div>
+        )}
+
+        {suggestions && suggestions.length > 0 && (
+          <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950 p-4">
+            <p className="text-xs text-neutral-500">
+              {suggestions.length === 1 ? "Did you mean:" : "Which of these did you mean?"}
+            </p>
+            <ul className="mt-2 flex flex-col gap-2">
+              {suggestions.map((s, i) => (
+                <li key={i}>
+                  <button
+                    onClick={() => handleSelectSuggestion(s)}
+                    disabled={selectingSuggestion}
+                    className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-left text-sm text-neutral-200 transition hover:border-neutral-500 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <span className="mr-2 font-mono text-xs text-neutral-500">{s.type}</span>
+                    {s.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={() => setSuggestions(null)}
+              className="mt-2 text-xs text-neutral-500 hover:text-neutral-300"
+            >
+              None of these — cancel
+            </button>
+          </div>
+        )}
 
         {lastResult && (
           <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950 p-4 text-sm">
