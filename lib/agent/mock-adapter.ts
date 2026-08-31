@@ -81,6 +81,22 @@ export class MockAgentAdapter implements AgentAdapter {
     const email = userRequest.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0];
     const lookupHint = name ?? email;
 
+    const createPipelineMatch = userRequest.match(
+      /create\s+(?:a\s+)?(?:new\s+)?pipeline\s+(?:called|named)\s+([A-Za-z0-9][A-Za-z0-9\s]*?)\s+with\s+stages\s+(.+?)[.]?\s*$/i,
+    );
+    if (createPipelineMatch) {
+      const pipelineName = createPipelineMatch[1]!.trim();
+      const stageNames = createPipelineMatch[2]!
+        .replace(/,?\s+and\s+/i, ", ")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return {
+        intent: "CRM_UPDATE",
+        actions: [{ type: "CREATE_PIPELINE", payload: { name: pipelineName, stages: stageNames.map((s) => ({ name: s })) } }],
+      };
+    }
+
     if (opportunityMatch?.[1]) {
       const stageLabel = opportunityMatch[1].trim();
       actions.push({

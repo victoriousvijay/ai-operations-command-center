@@ -99,6 +99,22 @@ test("mock agent parses 'create an opportunity for X worth Y in the Z pipeline, 
   assert.equal(payload.monetaryValue, 45000);
 });
 
+test("mock agent parses 'create a new pipeline called X with stages A, B, C and D'", async () => {
+  const agent = new MockAgentAdapter();
+  const proposal = await agent.propose(
+    "Create a new pipeline called Roofing Leads with stages New Lead, Contacted, Qualified, Proposal and Won.",
+  );
+
+  assert.equal(proposal.actions.length, 1);
+  assert.equal(proposal.actions[0]?.type, "CREATE_PIPELINE");
+  const payload = proposal.actions[0]?.payload as { name: string; stages: Array<{ name: string }> };
+  assert.equal(payload.name, "Roofing Leads");
+  assert.deepEqual(
+    payload.stages.map((s) => s.name),
+    ["New Lead", "Contacted", "Qualified", "Proposal", "Won"],
+  );
+});
+
 test("mock agent returns UNKNOWN intent and no actions for an unrelated request", async () => {
   const agent = new MockAgentAdapter();
   const proposal = await agent.propose("What's the weather like today?");
