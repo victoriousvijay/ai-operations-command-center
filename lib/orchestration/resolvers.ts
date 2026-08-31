@@ -5,6 +5,20 @@ import { SYNTHETIC_CONTACT_PREFIX } from "@/lib/agent/mock-adapter";
 type Resolved = { payload: Record<string, unknown>; error?: string };
 
 /**
+ * Matches `needle` against each item's name, preferring an exact
+ * (case-insensitive) match over a substring one. Without this, a search
+ * for "Qualified" ambiguously matches "AI Qualified" too (a real case in
+ * this account: both exist in the same pipeline) even when the exact
+ * stage exists and is the obviously intended one.
+ */
+function matchByNameExactThenFuzzy<T>(items: T[], getName: (item: T) => string, needle: string): T[] {
+  const needleLower = needle.toLowerCase();
+  const exact = items.filter((item) => getName(item).toLowerCase() === needleLower);
+  if (exact.length > 0) return exact;
+  return items.filter((item) => getName(item).toLowerCase().includes(needleLower));
+}
+
+/**
  * Turns a name/email hint into a real GoHighLevel contact ID. Never
  * invents a contact — if no real match exists, this returns a clear error
  * instead of a guess (ARCHITECTURE.md's "never invent IDs" rule).
@@ -152,8 +166,7 @@ export async function resolvePipelineStage(ghl: GhlClient, payload: Record<strin
       return { payload: rest, error: `Could not find the opportunity's own pipeline ("${knownPipelineId}") to resolve stage "${stageNameHint}" against.` };
     }
   } else if (typeof pipelineNameHint === "string" && pipelineNameHint) {
-    const nameLower = pipelineNameHint.toLowerCase();
-    candidates = pipelines.filter((p) => p.name.toLowerCase().includes(nameLower));
+    candidates = matchByNameExactThenFuzzy(pipelines, (p) => p.name, pipelineNameHint);
     if (candidates.length === 0) {
       const available = pipelines.map((p) => p.name).join(", ") || "none configured";
       return { payload: rest, error: `No GoHighLevel pipeline found matching "${pipelineNameHint}". Available pipelines: ${available}.` };
@@ -161,14 +174,23 @@ export async function resolvePipelineStage(ghl: GhlClient, payload: Record<strin
   }
 
   const stageLower = stageNameHint.toLowerCase();
-  const matches: Array<{ pipelineId: string; pipelineName: string; stageId: string; stageName: string }> = [];
+  type StageMatch = { pipelineId: string; pipelineName: string; stageId: string; stageName: string };
+  const exactMatches: StageMatch[] = [];
+  const fuzzyMatches: StageMatch[] = [];
   for (const pipeline of candidates) {
     for (const stage of pipeline.stages) {
-      if (stage.name.toLowerCase() === stageLower || stage.name.toLowerCase().includes(stageLower)) {
-        matches.push({ pipelineId: pipeline.id, pipelineName: pipeline.name, stageId: stage.id, stageName: stage.name });
+      const entry = { pipelineId: pipeline.id, pipelineName: pipeline.name, stageId: stage.id, stageName: stage.name };
+      if (stage.name.toLowerCase() === stageLower) {
+        exactMatches.push(entry);
+      } else if (stage.name.toLowerCase().includes(stageLower)) {
+        fuzzyMatches.push(entry);
       }
     }
   }
+  // An exact match always wins over a substring one — otherwise "Qualified"
+  // ambiguously matches "AI Qualified" too (a real case in this account:
+  // both exist in the same pipeline), even though the exact stage exists.
+  const matches = exactMatches.length > 0 ? exactMatches : fuzzyMatches;
 
   if (matches.length === 0) {
     const available = candidates.flatMap((p) => p.stages.map((s) => `${p.name} > ${s.name}`)).join(", ") || "none";
@@ -209,8 +231,7 @@ export async function resolvePipelineMutation(
       return { payload: rest, error: "No pipelineId was given and there is no pipeline name to look it up by." };
     }
     const pipelines = await ghl.listPipelines();
-    const nameLower = pipelineNameHint.toLowerCase();
-    const matches = pipelines.filter((p) => p.name.toLowerCase().includes(nameLower));
+    const matches = matchByNameExactThenFuzzy(pipelines, (p) => p.name, pipelineNameHint);
     if (matches.length === 0) {
       const available = pipelines.map((p) => p.name).join(", ") || "none configured";
       return { payload: rest, error: `No pipeline found matching "${pipelineNameHint}". Available pipelines: ${available}.` };
@@ -248,9 +269,12 @@ export async function resolvePipelineMutation(
   // UPDATE_PIPELINE_STAGE / DELETE_PIPELINE_STAGE both need to find one existing stage first.
   const stageId = rest.stageId as string | undefined;
   const stageLower = typeof stageNameHint === "string" ? stageNameHint.toLowerCase() : undefined;
-  const stageMatches = pipeline.stages.filter((s) =>
-    stageId ? s.id === stageId : stageLower ? s.name.toLowerCase().includes(stageLower) : false,
-  );
+  const stageExactMatches = pipeline.stages.filter((s) => (stageId ? s.id === stageId : stageLower ? s.name.toLowerCase() === stageLower : false));
+  // An exact match always wins over a substring one (e.g. "Qualified" vs "AI Qualified").
+  const stageMatches =
+    stageExactMatches.length > 0
+      ? stageExactMatches
+      : pipeline.stages.filter((s) => (stageId ? s.id === stageId : stageLower ? s.name.toLowerCase().includes(stageLower) : false));
 
   if (stageMatches.length === 0) {
     const available = pipeline.stages.map((s) => s.name).join(", ") || "none";
@@ -307,8 +331,7 @@ export async function resolveLeadAssignment(ghl: GhlClient, payload: Record<stri
     return { payload: rest, error: `Could not list GoHighLevel users: ${error instanceof Error ? error.message : "unknown error"}` };
   }
 
-  const nameLower = assignedToNameHint.toLowerCase();
-  const matches = users.filter((u) => u.name.toLowerCase().includes(nameLower));
+  const matches = matchByNameExactThenFuzzy(users, (u) => u.name, assignedToNameHint);
   if (matches.length === 0) {
     const available = users.map((u) => u.name).join(", ") || "none";
     return { payload: rest, error: `No GoHighLevel user found matching "${assignedToNameHint}". Available users: ${available}.` };

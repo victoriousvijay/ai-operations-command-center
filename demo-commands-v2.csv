@@ -1,0 +1,16 @@
+command,name,email,phone,tags,task,stage,pipeline,value,note,subject
+CREATE_CONTACT,Karan Malhotra,karan.malhotra.demo@example.com,+15551230001,,,,,,,
+CREATE_CONTACT,Meera Iyer,meera.iyer.demo@example.com,+15551230002,,,,,,,
+CREATE_CONTACT,Aditya Rao,aditya.rao.demo@example.com,+15551230003,,,,,,,
+ADD_CONTACT_TAG,Karan Malhotra,karan.malhotra.demo@example.com,,warm-lead,,,,,,
+REMOVE_CONTACT_TAG,Karan Malhotra,karan.malhotra.demo@example.com,,warm-lead,,,,,,
+CREATE_TASK,Meera Iyer,meera.iyer.demo@example.com,,,Call to introduce our services,,,,,
+ADD_NOTE,Aditya Rao,aditya.rao.demo@example.com,,,,,,,Left a voicemail - requested a callback tomorrow,
+CREATE_OPPORTUNITY,Karan Malhotra,karan.malhotra.demo@example.com,,,,New Lead,Solar Leads,45000,,
+CREATE_OPPORTUNITY,Meera Iyer,meera.iyer.demo@example.com,,,,Contacted,Solar Leads,80000,,
+UPDATE_OPPORTUNITY,Karan Malhotra,karan.malhotra.demo@example.com,,,,Qualified,,,,
+CHANGE_STATUS,Meera Iyer,meera.iyer.demo@example.com,,,,AI Qualified,,,,
+SEND_SMS,Aditya Rao,aditya.rao.demo@example.com,,,"Hi Aditya, thanks for your interest - we will call you shortly.",,,,,
+SEND_EMAIL,Karan Malhotra,karan.malhotra.demo@example.com,,,Thanks for connecting with us today. Let us know if you have any questions.,,,,,Great speaking with you today
+ASSIGN_LEAD,Meera Iyer,meera.iyer.demo@example.com,,,,Sales Team,,,,
+INVALID_COMMAND,Broken Row,not-a-real-email,,,,,,,,

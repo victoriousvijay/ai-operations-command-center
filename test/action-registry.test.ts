@@ -201,6 +201,19 @@ test("resolvePipelineStage uses an already-known pipelineId to disambiguate a st
   }
 });
 
+test("resolvePipelineStage prefers an exact stage match over a substring one (real bug: 'Qualified' ambiguously matched 'AI Qualified' too)", async () => {
+  const previous = process.env.GHL_ADAPTER;
+  process.env.GHL_ADAPTER = "real";
+  try {
+    const ghl = fakeGhlClient({ listPipelines: async () => [SOLAR_PIPELINE] });
+    const result = await resolvePipelineStage(ghl, { pipelineNameHint: "Solar Leads", stageNameHint: "Qualified" });
+    assert.equal(result.error, undefined);
+    assert.equal(result.payload.pipelineStageId, "stage-qualified");
+  } finally {
+    process.env.GHL_ADAPTER = previous;
+  }
+});
+
 test("resolvePipelineStage errors clearly (and lists real stages) when no stage matches", async () => {
   const previous = process.env.GHL_ADAPTER;
   process.env.GHL_ADAPTER = "real";

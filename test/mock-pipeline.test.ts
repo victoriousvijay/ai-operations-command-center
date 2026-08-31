@@ -86,6 +86,19 @@ test("mock agent extracts the contact name correctly when a command verb opens t
   assert.equal(payload.opportunityId, "mock-opportunity-greg-whitfield");
 });
 
+test("mock agent parses 'create an opportunity for X worth Y in the Z pipeline, stage W'", async () => {
+  const agent = new MockAgentAdapter();
+  const proposal = await agent.propose("Create an opportunity for Karan Malhotra worth 45000 in the Solar Leads pipeline, stage New Lead.");
+
+  assert.equal(proposal.actions.length, 1);
+  assert.equal(proposal.actions[0]?.type, "CREATE_OPPORTUNITY");
+  const payload = proposal.actions[0]?.payload as Record<string, unknown>;
+  assert.equal(payload.contactLookupHint, "Karan Malhotra");
+  assert.equal(payload.pipelineNameHint, "Solar Leads");
+  assert.equal(payload.stageNameHint, "New Lead");
+  assert.equal(payload.monetaryValue, 45000);
+});
+
 test("mock agent returns UNKNOWN intent and no actions for an unrelated request", async () => {
   const agent = new MockAgentAdapter();
   const proposal = await agent.propose("What's the weather like today?");

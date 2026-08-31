@@ -102,6 +102,26 @@ export class MockAgentAdapter implements AgentAdapter {
       });
     }
 
+    const createOppMatch = userRequest.match(
+      /create\s+(?:an?\s+)?opportunity\s+for\s+.+?(?:\s+worth\s+([\d,]+))?\s+in\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9\s]*?)\s+pipeline(?:\s*,?\s*stage\s+([A-Za-z0-9][A-Za-z0-9\s]*?))?[.,]?\s*$/i,
+    );
+    if (createOppMatch) {
+      const value = createOppMatch[1]?.replace(/,/g, "");
+      const pipelineLabel = createOppMatch[2]?.trim();
+      const stageLabel = createOppMatch[3]?.trim();
+      actions.push({
+        type: "CREATE_OPPORTUNITY",
+        payload: {
+          contactId: `${SYNTHETIC_CONTACT_PREFIX}${slug}`,
+          ...(lookupHint ? { contactLookupHint: lookupHint } : {}),
+          name: name ? `${name} Opportunity` : "New Opportunity",
+          ...(pipelineLabel ? { pipelineNameHint: pipelineLabel } : {}),
+          ...(stageLabel ? { stageNameHint: stageLabel } : {}),
+          ...(value ? { monetaryValue: Number(value) } : {}),
+        },
+      });
+    }
+
     const tagMatch = userRequest.match(/\badd\s+(?:the\s+)?["']?([\w-]+)["']?\s+tag\b/i);
     const untagMatch = userRequest.match(/\bremove\s+(?:the\s+)?["']?([\w-]+)["']?\s+tag\b/i);
     if (tagMatch?.[1]) {
