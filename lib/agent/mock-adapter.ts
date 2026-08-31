@@ -97,6 +97,26 @@ export class MockAgentAdapter implements AgentAdapter {
       };
     }
 
+    const bulkMoveMatch = userRequest.match(
+      /move\s+all\s+(?:the\s+)?opportunit(?:y|ies)\s+in\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9\s]*?)\s+pipeline\s+to\s+([A-Za-z0-9][A-Za-z0-9\s]*?)[.]?\s*$/i,
+    );
+    if (bulkMoveMatch) {
+      return {
+        intent: "CRM_UPDATE",
+        actions: [
+          {
+            type: "UPDATE_OPPORTUNITY",
+            // No contactLookupHint/opportunityId at all — bulkPipelineNameHint
+            // signals lib/orchestration/execute.ts's expandBulkOpportunityMoves
+            // to replace this ONE proposed action with one real
+            // UPDATE_OPPORTUNITY per opportunity actually in that pipeline
+            // right now (never invented — fetched live from GoHighLevel).
+            payload: { bulkPipelineNameHint: bulkMoveMatch[1]!.trim(), stageNameHint: bulkMoveMatch[2]!.trim() },
+          },
+        ],
+      };
+    }
+
     if (opportunityMatch?.[1]) {
       const stageLabel = opportunityMatch[1].trim();
       actions.push({

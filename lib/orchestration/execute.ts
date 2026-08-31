@@ -2,9 +2,17 @@ import "server-only";
 import { isAllowedAction, MUTATION_TIER, type AllowedAction } from "@/lib/actions/allowlist";
 import { getAgentAdapter } from "@/lib/agent";
 import { getGhlClient } from "@/lib/ghl";
+import type { GhlClient } from "@/lib/ghl/types";
 import { getN8nClient } from "@/lib/n8n";
 import { attachGhlRequest } from "@/lib/n8n/client";
-import { resolveContactId, resolveLeadAssignment, resolveOpportunityId, resolvePipelineMutation, resolvePipelineStage } from "./resolvers";
+import {
+  matchByNameExactThenFuzzy,
+  resolveContactId,
+  resolveLeadAssignment,
+  resolveOpportunityId,
+  resolvePipelineMutation,
+  resolvePipelineStage,
+} from "./resolvers";
 import {
   createAutomationAction,
   createAutomationRequest,
@@ -317,6 +325,104 @@ export async function executeStructuredActions(params: {
   return dispatchProposal(request.id, params.intent, params.actions, params.contactIdOverride, params.confirm);
 }
 
+// Never expand more than this many opportunities from one bulk-move
+// command in a single request — a safety cap, not a real-world limit
+// (every pipeline in this account today has well under this many).
+const MAX_BULK_EXPANSION = 50;
+
+/**
+ * Replaces a single "move all opportunities in [pipeline] to [stage]"
+ * marker action (payload.bulkPipelineNameHint, produced by the mock
+ * adapter and the equivalent OpenClaw tool call) with one real
+ * UPDATE_OPPORTUNITY action per opportunity CURRENTLY in that pipeline —
+ * fetched live from GoHighLevel, never invented. Any other action passes
+ * through unchanged. A pipeline that can't be resolved, or that has no
+ * opportunities, becomes a single synthetic "failed" result explaining
+ * why instead of being silently dropped.
+ */
+export async function expandBulkOpportunityMoves(
+  actions: ProposedAction[],
+  ghl: GhlClient = getGhlClient(),
+): Promise<{ actions: ProposedAction[]; errors: ExecutedActionResult[] }> {
+  const expanded: ProposedAction[] = [];
+  const errors: ExecutedActionResult[] = [];
+
+  for (const proposed of actions) {
+    const pipelineNameHint = proposed.payload?.bulkPipelineNameHint;
+    if (proposed.type !== "UPDATE_OPPORTUNITY" || typeof pipelineNameHint !== "string") {
+      expanded.push(proposed);
+      continue;
+    }
+
+    const stageNameHint = typeof proposed.payload.stageNameHint === "string" ? proposed.payload.stageNameHint : undefined;
+
+    try {
+      const pipelines = await ghl.listPipelines();
+      const matches = matchByNameExactThenFuzzy(pipelines, (p) => p.name, pipelineNameHint);
+      if (matches.length === 0) {
+        const available = pipelines.map((p) => p.name).join(", ") || "none configured";
+        errors.push({
+          type: "UPDATE_OPPORTUNITY",
+          status: "failed",
+          error: `No pipeline found matching "${pipelineNameHint}". Available pipelines: ${available}.`,
+        });
+        continue;
+      }
+      if (matches.length > 1) {
+        errors.push({
+          type: "UPDATE_OPPORTUNITY",
+          status: "failed",
+          error: `"${pipelineNameHint}" matches more than one pipeline (${matches.map((p) => p.name).join(", ")}) — please be more specific.`,
+        });
+        continue;
+      }
+
+      const pipeline = matches[0]!;
+      const opportunities = await ghl.searchOpportunities({ pipelineId: pipeline.id });
+      if (opportunities.length === 0) {
+        errors.push({
+          type: "UPDATE_OPPORTUNITY",
+          status: "failed",
+          error: `Pipeline "${pipeline.name}" has no opportunities to move.`,
+        });
+        continue;
+      }
+
+      if (opportunities.length > MAX_BULK_EXPANSION) {
+        errors.push({
+          type: "UPDATE_OPPORTUNITY",
+          status: "failed",
+          error: `Pipeline "${pipeline.name}" has ${opportunities.length} opportunities — only the first ${MAX_BULK_EXPANSION} were queued below. Run this command again to move the rest.`,
+        });
+      }
+
+      for (const opp of opportunities.slice(0, MAX_BULK_EXPANSION)) {
+        expanded.push({
+          type: "UPDATE_OPPORTUNITY",
+          payload: {
+            // contactId comes straight off the real opportunity record so
+            // resolveContactId (which every UPDATE_OPPORTUNITY goes
+            // through) has a usable ID and doesn't try to search for a
+            // contact by name — there's no name to search by here.
+            ...(opp.contactId ? { contactId: opp.contactId } : {}),
+            opportunityId: opp.id,
+            pipelineId: pipeline.id,
+            ...(stageNameHint ? { stageNameHint } : {}),
+          },
+        });
+      }
+    } catch (error) {
+      errors.push({
+        type: "UPDATE_OPPORTUNITY",
+        status: "failed",
+        error: error instanceof Error ? error.message : `Failed to expand bulk move for pipeline "${pipelineNameHint}".`,
+      });
+    }
+  }
+
+  return { actions: expanded, errors };
+}
+
 /**
  * Only actions marked "destructive" in MUTATION_TIER ever require
  * confirmation — everything else in the same batch (contact creates,
@@ -336,9 +442,11 @@ async function dispatchProposal(
   contactIdOverride: string | undefined,
   confirm: boolean | undefined,
 ): Promise<ExecuteResult> {
+  const { actions: expandedActions, errors: expansionErrors } = await expandBulkOpportunityMoves(actions);
+
   const destructiveActions: ProposedAction[] = [];
   const safeActions: ProposedAction[] = [];
-  for (const proposed of actions) {
+  for (const proposed of expandedActions) {
     if (isAllowedAction(proposed.type) && MUTATION_TIER[proposed.type] === "destructive") {
       destructiveActions.push(proposed);
     } else {
@@ -347,7 +455,7 @@ async function dispatchProposal(
   }
 
   await updateAutomationRequest(requestId, { status: "executing" });
-  const results: ExecutedActionResult[] = [];
+  const results: ExecutedActionResult[] = [...expansionErrors];
   for (const proposed of safeActions) {
     results.push(await dispatchAction(requestId, proposed, contactIdOverride));
   }

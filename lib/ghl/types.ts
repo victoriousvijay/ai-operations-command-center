@@ -154,6 +154,8 @@ export interface UpdateOpportunityInput {
 export interface SearchOpportunitiesInput {
   contactId?: string;
   query?: string;
+  /** Verified live: GET /opportunities/search?pipeline_id=... filters correctly. */
+  pipelineId?: string;
 }
 
 // ── Pipelines ───────────────────────────────────────────────────────────

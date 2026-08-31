@@ -11,7 +11,7 @@ type Resolved = { payload: Record<string, unknown>; error?: string };
  * this account: both exist in the same pipeline) even when the exact
  * stage exists and is the obviously intended one.
  */
-function matchByNameExactThenFuzzy<T>(items: T[], getName: (item: T) => string, needle: string): T[] {
+export function matchByNameExactThenFuzzy<T>(items: T[], getName: (item: T) => string, needle: string): T[] {
   const needleLower = needle.toLowerCase();
   const exact = items.filter((item) => getName(item).toLowerCase() === needleLower);
   if (exact.length > 0) return exact;

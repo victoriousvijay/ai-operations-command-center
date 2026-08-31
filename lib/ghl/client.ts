@@ -229,9 +229,10 @@ export class RealGhlClient implements GhlClient {
 
   async searchOpportunities(input: SearchOpportunitiesInput): Promise<GhlOpportunity[]> {
     const locationId = this.requireLocationId("opportunity search");
-    const params = new URLSearchParams({ location_id: locationId, limit: "20" });
+    const params = new URLSearchParams({ location_id: locationId, limit: "100" });
     if (input.contactId) params.set("contact_id", input.contactId);
     if (input.query) params.set("q", input.query);
+    if (input.pipelineId) params.set("pipeline_id", input.pipelineId);
     const data = await this.request<{ opportunities?: GhlOpportunity[] }>(
       `/opportunities/search?${params.toString()}`,
     );

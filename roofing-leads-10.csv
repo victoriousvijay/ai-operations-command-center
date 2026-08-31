@@ -1,0 +1,11 @@
+command,name,email,stage,pipeline,value
+CREATE_OPPORTUNITY,Dev Patel,dev.patel@example.com,New Lead,Roofing Leads,32000
+CREATE_OPPORTUNITY,Isha Jain,isha.jain@example.com,Contacted,Roofing Leads,41000
+CREATE_OPPORTUNITY,Arjun Malhotra,arjun.malhotra@example.com,Qualified,Roofing Leads,55000
+CREATE_OPPORTUNITY,Sneha Kapoor,sneha.kapoor@example.com,New Lead,Roofing Leads,29000
+CREATE_OPPORTUNITY,Kabir Singh,kabir.singh@example.com,Contacted,Roofing Leads,48000
+CREATE_OPPORTUNITY,Ananya Gupta,ananya.gupta@example.com,New Lead,Roofing Leads,36000
+CREATE_OPPORTUNITY,Rohan Verma,rohan.verma@example.com,Contacted,Roofing Leads,63000
+CREATE_OPPORTUNITY,Priya Mehta,priya.mehta@example.com,Qualified,Roofing Leads,45000
+CREATE_OPPORTUNITY,Patricia Alvarado,patricia.alvarado@homefrontroofing.com,New Lead,Roofing Leads,52000
+CREATE_OPPORTUNITY,Brian Chu,brian.chu@northgatewindows.com,New Lead,Roofing Leads,39000

@@ -77,7 +77,9 @@ function describeAction(type: AllowedAction, p: Record<string, unknown>): string
     case "CREATE_OPPORTUNITY":
       return `Create an opportunity for ${who}${p.stageNameHint ? ` in stage "${p.stageNameHint}"` : ""}${p.pipelineNameHint ? ` (${p.pipelineNameHint})` : ""}${p.monetaryValue ? `, worth ${p.monetaryValue}` : ""}`;
     case "UPDATE_OPPORTUNITY":
-      return `Move ${who}'s opportunity to "${p.stageNameHint ?? p.name ?? "?"}"`;
+      return typeof p.bulkPipelineNameHint === "string"
+        ? `Move all opportunities in "${p.bulkPipelineNameHint}" to "${p.stageNameHint ?? "?"}"`
+        : `Move ${who}'s opportunity to "${p.stageNameHint ?? p.name ?? "?"}"`;
     case "DELETE_OPPORTUNITY":
       return `Delete ${who}'s opportunity — destructive, needs confirmation`;
     case "LIST_PIPELINES":

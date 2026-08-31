@@ -25,7 +25,7 @@ const ACTION_DESCRIPTIONS: Record<AllowedAction, string> = {
   SEARCH_OPPORTUNITIES: "Search/list GoHighLevel opportunities, optionally filtered to one contact's opportunities.",
   GET_OPPORTUNITY: "Look up a single GoHighLevel opportunity's details by its real opportunityId.",
   CREATE_OPPORTUNITY: `Create a new opportunity for a contact in a pipeline, with an optional monetary value.${CONTACT_ID_NOTE}${STAGE_NOTE}`,
-  UPDATE_OPPORTUNITY: `Update an opportunity — most commonly moving it to a different pipeline stage.${OPPORTUNITY_ID_NOTE}${STAGE_NOTE}`,
+  UPDATE_OPPORTUNITY: `Update an opportunity — most commonly moving it to a different pipeline stage. If the user asks to move ALL (or "every") opportunity in a named pipeline to a stage, leave contactId/opportunityId empty and set bulkPipelineNameHint to that pipeline's name instead — every real opportunity currently in it will be looked up and moved; never invent individual opportunities for this.${OPPORTUNITY_ID_NOTE}${STAGE_NOTE}`,
   DELETE_OPPORTUNITY: `Permanently delete an opportunity. Destructive — only propose this when explicitly asked.${OPPORTUNITY_ID_NOTE}`,
 
   LIST_PIPELINES: "List every pipeline and its stages, with real names and IDs. Use this before UPDATE_OPPORTUNITY/CREATE_OPPORTUNITY if you need to see what pipelines/stages actually exist.",
@@ -72,6 +72,7 @@ function buildToolSchema() {
         pipelineStageId: { type: "string" },
         pipelineNameHint: { type: "string", description: "The pipeline's name, if the user named one, when pipelineId isn't already known." },
         stageNameHint: { type: "string", description: "The target stage's name (e.g. 'Qualified', 'AI Qualified'), when pipelineStageId isn't already known." },
+        bulkPipelineNameHint: { type: "string", description: "For UPDATE_OPPORTUNITY only: a pipeline's name, meaning 'every opportunity currently in this pipeline' — used for 'move all opportunities in X to Y' requests instead of a single contactId/opportunityId." },
         stages: { type: "array", items: { type: "object", properties: { name: { type: "string" } } }, description: "For CREATE_PIPELINE only: the ordered list of stage names to create." },
         stageName: { type: "string", description: "For CREATE_PIPELINE_STAGE: the new stage's name." },
         newStageName: { type: "string", description: "For UPDATE_PIPELINE_STAGE: the stage's new name." },
