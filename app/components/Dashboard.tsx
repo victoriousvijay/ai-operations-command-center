@@ -363,9 +363,9 @@ export function Dashboard() {
             onClick={handleSuggest}
             disabled={suggesting || !userRequest.trim()}
             className="rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2 text-sm font-medium text-neutral-100 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
-            title="Turn this sentence into one or more candidate commands to pick from — nothing runs until you choose one."
+            title="Turn this loose sentence into one or more precise candidate commands to pick from — nothing runs until you choose one."
           >
-            {suggesting ? "Thinking…" : "Suggest Commands"}
+            {suggesting ? "Enhancing…" : "✨ Enhance Command"}
           </button>
           <button
             onClick={handleExecute}
@@ -385,7 +385,7 @@ export function Dashboard() {
         {suggestions && suggestions.length > 0 && (
           <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950 p-4">
             <p className="text-xs text-neutral-500">
-              {suggestions.length === 1 ? "Did you mean:" : "Which of these did you mean?"}
+              {suggestions.length === 1 ? "Enhanced command — did you mean:" : "Enhanced into a few possibilities — which did you mean?"}
             </p>
             <ul className="mt-2 flex flex-col gap-2">
               {suggestions.map((s, i) => (
